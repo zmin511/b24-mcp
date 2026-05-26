@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: b24_mcp
+      POSTGRES_USER: b24_mcp
+      POSTGRES_PASSWORD: b24_mcp_password
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U b24_mcp -d b24_mcp"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql://b24_mcp:b24_mcp_password@db:5432/b24_mcp
+      JOBS_ENABLED: "true"
+      JOBS_POLL_INTERVAL_SEC: "60"
+      ALLOW_UNCONFIRMED_WRITES: "false"
+      BITRIX_DEFAULT_CONNECTION_ID: "default"
+      APP_ENCRYPTION_KEY_BASE64: ""
+      MCP_HTTP_ENABLED: "true"
+      MCP_HTTP_HOST: "0.0.0.0"
+      MCP_HTTP_PORT: "7010"
+      MCP_AUTH_TOKEN: ""
+    depends_on:
+      db:
+        condition: service_healthy
+    stdin_open: true
+    tty: true
+    ports:
+      - "7010:7010"
+    command: ["npm","run","dev:http"]
