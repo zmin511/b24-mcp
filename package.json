@@ -1,0 +1,42 @@
+{
+  "name": "b24-bp-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Production-ready (MVP) MCP server for Bitrix24 with polling sync and local reporting DB.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "dev:http": "tsx src/index_http.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "start:http": "node dist/index_http.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "migrate": "node dist/storage/migrate.js",
+    "migrate:dev": "tsx src/storage/migrate.ts",
+    "seed:toolcalls": "tsx src/scripts/seedToolCalls.ts",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "pino": "^9.3.2",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.23.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "@types/express": "^4.17.21",
+    "@types/pg": "^8.11.10",
+    "@eslint/js": "^9.9.1",
+    "eslint": "^9.9.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.8"
+  }
+}
