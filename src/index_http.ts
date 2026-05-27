@@ -1,5 +1,4 @@
 import express from "express";
-import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { loadConfig } from "./common/config.js";
 import { createLogger } from "./common/logger.js";
@@ -16,19 +15,17 @@ async function main() {
 
   await runMigrations();
 
-  const { server } = createMcpServer({ config, logger, pool });
-
   if (!config.MCP_HTTP_ENABLED) {
     throw new Error("MCP_HTTP_ENABLED=false; nothing to do in index_http");
   }
 
-  const app = createMcpExpressApp({ host: config.MCP_HTTP_HOST });
+  const app = express();
+  app.use(express.json({ limit: "10mb" }));
 
-  // Optional bearer auth
   app.use((req, res, next) => {
     if (!config.MCP_AUTH_TOKEN) return next();
     const h = req.headers.authorization ?? "";
-    const m = /^Bearer\\s+(.+)$/i.exec(h);
+    const m = /^Bearer\s+(.+)$/i.exec(h);
     if (!m || m[1] !== config.MCP_AUTH_TOKEN) {
       res.status(401).json({ error: "unauthorized" });
       return;
@@ -39,18 +36,30 @@ async function main() {
 
   app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 
-  const transport = new StreamableHTTPServerTransport({
-    // Stateless mode: no server-side sessions required for MVP.
-    sessionIdGenerator: undefined
-  });
+  app.all("/mcp", async (req, res) => {
+    try {
+      const { server } = createMcpServer({ config, logger, pool });
 
-  await server.connect(transport as any);
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined
+      });
 
-  app.post("/mcp", async (req, res) => {
-    await transport.handleRequest(req as any, res as any, req.body);
-  });
-  app.get("/mcp", async (req, res) => {
-    await transport.handleRequest(req as any, res as any);
+      await server.connect(transport as any);
+
+      if (req.method === "GET") {
+        await transport.handleRequest(req as any, res as any);
+        return;
+      }
+
+      await transport.handleRequest(req as any, res as any, req.body);
+    } catch (err) {
+      logger.error({ err }, "MCP /mcp failed");
+      if (!res.headersSent) {
+        res
+          .status(500)
+          .json({ error: "MCP /mcp failed", message: err instanceof Error ? err.message : String(err) });
+      }
+    }
   });
 
   app.listen(config.MCP_HTTP_PORT, config.MCP_HTTP_HOST, () => {
@@ -62,8 +71,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error(err);
   process.exitCode = 1;
 });
-

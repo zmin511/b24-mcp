@@ -15,6 +15,25 @@ function normalizeBaseUrl(url: string) {
   return url.endsWith("/") ? url : `${url}/`;
 }
 
+function appendFormValue(body: URLSearchParams, key: string, value: unknown) {
+  if (value === undefined || value === null) return;
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => appendFormValue(body, `${key}[${index}]`, item));
+    return;
+  }
+
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    for (const [childKey, childValue] of entries) {
+      appendFormValue(body, `${key}[${childKey}]`, childValue);
+    }
+    return;
+  }
+
+  body.set(key, String(value));
+}
+
 export class BitrixRestClient {
   private readonly logger: Logger;
   private readonly auth: BitrixAuth;
@@ -43,8 +62,7 @@ export class BitrixRestClient {
     const doFetch = async (): Promise<BitrixRestResponse<T>> => {
       const body = new URLSearchParams();
       for (const [key, value] of Object.entries(params)) {
-        if (value === undefined) continue;
-        body.set(key, typeof value === "string" ? value : JSON.stringify(value));
+        appendFormValue(body, key, value);
       }
 
       const headers: Record<string, string> = {

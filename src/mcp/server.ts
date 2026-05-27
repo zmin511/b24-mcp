@@ -21,7 +21,7 @@ import { encryptString } from "../common/crypto.js";
 import { syncRecentTasks } from "../jobs/syncRecentTasks.js";
 import { syncTaskById } from "../jobs/syncTaskById.js";
 
-type Ctx = { config: AppConfig; pool: DbPool; logger: Logger };
+export type Ctx = { config: AppConfig; pool: DbPool; logger: Logger };
 
 type ToolDef = {
   name: string;
@@ -36,7 +36,7 @@ const baseInput = z.object({
   confirm: z.boolean().optional()
 });
 
-function toolList(): ToolDef[] {
+export function toolList(): ToolDef[] {
   return [
     {
       name: "bitrix_health_check",
@@ -901,7 +901,7 @@ export function createMcpServer(ctx: Ctx) {
           result: errJson
         });
       }
-      return { content: [{ type: "json", json: errJson }], isError: true };
+      return { content: [{ type: "text", text: JSON.stringify(errJson, null, 2) }], isError: true };
     }
   });
 
