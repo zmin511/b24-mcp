@@ -14,7 +14,7 @@ export class BitrixTasksService {
   }
 
   taskFields() {
-    return this.client.call("tasks.task.fields", {});
+    return this.client.call("tasks.task.getFields", {});
   }
 
   taskGet(taskId: number, params: Record<string, unknown> = {}) {
