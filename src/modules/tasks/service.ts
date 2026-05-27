@@ -128,7 +128,13 @@ export class BitrixTasksService {
   }
 
   reminderAdd(taskId: number, userId: number, remindAt: string) {
-    return this.client.call("tasks.task.reminder.add", { taskId, userId, remindAt });
+    return this.client.call("tasks.task.reminder.add", {
+      taskId,
+      fields: {
+        userId,
+        remindAt
+      }
+    });
   }
 
   async normalizeTaskPayload(task: any) {
