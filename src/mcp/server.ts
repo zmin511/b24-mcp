@@ -13,6 +13,7 @@ import { BitrixKnowledgeService } from "../modules/knowledge/service.js";
 import { BitrixBizprocService } from "../modules/bizproc/service.js";
 import { BitrixUsersService } from "../modules/users/service.js";
 import { ReportsService } from "../modules/reports/service.js";
+import { BitrixImService } from "../modules/im/service.js";
 import { jsonResult } from "./types.js";
 import { requireConfirm, redactSecrets } from "./safety.js";
 import { writeAuditLog } from "../storage/audit.js";
@@ -450,6 +451,76 @@ export function toolList(): ToolDef[] {
           encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64,
           taskId: input.task_id
         });
+      }
+    },
+    {
+      name: "bitrix_im_recent_list",
+      description: "List recent dialogs/chats from Bitrix IM.",
+      risky: false,
+      inputSchema: baseInput,
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const im = new BitrixImService(client);
+        return { connectionId, res: await im.recentList() };
+      }
+    },
+    {
+      name: "bitrix_im_dialog_messages_get",
+      description: "Read messages from a Bitrix IM dialog/chat.",
+      risky: false,
+      inputSchema: z.object({ dialog_id: z.string().min(1), limit: z.number().int().positive().optional() }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const im = new BitrixImService(client);
+        return { connectionId, res: await im.dialogMessagesGet(input.dialog_id, input.limit) };
+      }
+    },
+    {
+      name: "bitrix_im_message_add",
+      description: "Send message to a Bitrix IM dialog/chat. Requires confirm=true.",
+      risky: true,
+      inputSchema: z.object({ dialog_id: z.string().min(1), message: z.string().min(1) }).merge(baseInput),
+      handler: async (ctx, input) => {
+        requireConfirm("bitrix_im_message_add", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const im = new BitrixImService(client);
+        return { connectionId, res: await im.messageAdd(input.dialog_id, input.message) };
+      }
+    },
+    {
+      name: "bitrix_im_notify_personal_add",
+      description: "Send personal notification to Bitrix user. Requires confirm=true.",
+      risky: true,
+      inputSchema: z.object({ user_id: z.number().int().positive(), message: z.string().min(1) }).merge(baseInput),
+      handler: async (ctx, input) => {
+        requireConfirm("bitrix_im_notify_personal_add", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const im = new BitrixImService(client);
+        return { connectionId, res: await im.notifyPersonalAdd(input.user_id, input.message) };
       }
     },
     {

@@ -42,8 +42,22 @@ export class BitrixTasksService {
   }
 
   async taskCommentsGet(taskId: number, chatId?: string) {
-    if (chatId && hasMethod(this.caps, "im.dialog.messages.get")) {
-      const chatRes = await this.client.call<any>("im.dialog.messages.get", { dialog_id: chatId });
+    let resolvedChatId = chatId;
+
+    if (!resolvedChatId) {
+      try {
+        const task = await this.client.call<any>("tasks.task.get", { taskId });
+        resolvedChatId =
+          task?.result?.task?.chatId ??
+          task?.result?.task?.chat?.id ??
+          task?.result?.task?.CHAT_ID;
+      } catch {
+        // Ignore task.get errors here and continue to legacy fallback.
+      }
+    }
+
+    if (resolvedChatId && hasMethod(this.caps, "im.dialog.messages.get")) {
+      const chatRes = await this.client.call<any>("im.dialog.messages.get", { dialog_id: String(resolvedChatId) });
       return { source: "chat" as const, messages: normalizeChatMessages(taskId, chatRes.result ?? chatRes) };
     }
 
@@ -58,12 +72,39 @@ export class BitrixTasksService {
   async taskChatSend(taskId: number, message: string) {
     const task = await this.client.call<any>("tasks.task.get", { taskId });
     const chatId = task?.result?.task?.chatId ?? task?.result?.task?.chat?.id ?? task?.result?.task?.CHAT_ID;
-    if (!chatId) throw new AppError("Task chatId not found; cannot send message", "CHAT_ID_MISSING", { status: 400 });
-    return this.client.call("tasks.task.chat.message.send", { taskId, message });
+
+    if (!chatId) {
+      throw new AppError("Task chatId not found; cannot send message", "CHAT_ID_MISSING", { status: 400 });
+    }
+
+    try {
+      return await this.client.call("tasks.task.chat.message.send", {
+        fields: {
+          taskId,
+          text: message
+        }
+      });
+    } catch (err: any) {
+      const methodNotFound =
+        err?.code === "BITRIX_HTTP" &&
+        (err?.details?.error === "ERROR_METHOD_NOT_FOUND" ||
+          err?.details?.error_description === "Method not found!");
+
+      if (methodNotFound) {
+        return this.legacyCommentAdd(taskId, message);
+      }
+
+      throw err;
+    }
   }
 
   legacyCommentAdd(taskId: number, message: string) {
-    return this.client.call("task.commentitem.add", { TASKID: taskId, FIELDS: { POST_MESSAGE: message } });
+    return this.client.call("task.commentitem.add", {
+      TASKID: taskId,
+      FIELDS: {
+        POST_MESSAGE: message
+      }
+    });
   }
 
   taskResultsGet(taskId: number) {
