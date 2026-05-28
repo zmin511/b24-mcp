@@ -28,8 +28,8 @@ Production-ready MVP MCP server for Bitrix24 with:
 This MVP stores connections in Postgres (`bitrix_connections`). Add one connection with a webhook:
 - Tool: `bitrix_connection_upsert` (requires `confirm=true`)
 
-## Deploy on Ubuntu (example: mcp.zmin.online)
-- Run with docker-compose, expose port `7010` to localhost only, then proxy via Nginx/Caddy to `https://mcp.zmin.online/b24/mcp`
+## Deploy on Ubuntu (example: your-mcp-domain.example.com)
+- Run with docker-compose, expose port `7010` to localhost only, then proxy via Nginx/Caddy to `https://your-mcp-domain.example.com/b24/mcp`
 - Set `MCP_AUTH_TOKEN` and require `Authorization: Bearer ...` from your GPT agent client.
 
 ## Safety
