@@ -19,3 +19,11 @@ node_modules/
 dist/
 backups/
 *.log
+
+# Backup/temp files
+*.bak
+*.bak*
+*_bak*
+*.backup
+*.tmp
+*.old
