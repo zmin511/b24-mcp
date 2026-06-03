@@ -102,13 +102,7 @@ export class BitrixDiskService {
     }
 
     const form = new FormData();
-
-    const arrayBuffer = params.buffer.buffer.slice(
-      params.buffer.byteOffset,
-      params.buffer.byteOffset + params.buffer.byteLength
-    ) as ArrayBuffer;
-
-    const blob = new Blob([arrayBuffer]);
+    const blob = new Blob([params.buffer]);
     form.append(field, blob, params.filename);
 
     const uploadRes = await fetch(uploadUrl, {

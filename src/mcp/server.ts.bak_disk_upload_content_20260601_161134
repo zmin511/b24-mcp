@@ -652,17 +652,9 @@ export function toolList(): ToolDef[] {
     },
     {
       name: "bitrix_disk_folder_upload",
-      description: "Upload file into Bitrix Disk folder. Supports local_path, text_content, or base64_content. Requires confirm=true.",
+      description: "Upload file from local path into folder. Requires confirm=true.",
       risky: true,
-      inputSchema: z
-        .object({
-          folder_id: z.number().int().positive(),
-          local_path: z.string().optional(),
-          filename: z.string().optional(),
-          text_content: z.string().optional(),
-          base64_content: z.string().optional()
-        })
-        .merge(baseInput),
+      inputSchema: z.object({ folder_id: z.number().int().positive(), local_path: z.string().min(1), filename: z.string().optional() }).merge(baseInput),
       handler: async (ctx, input) => {
         requireConfirm("bitrix_disk_folder_upload", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
         const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
@@ -673,105 +665,7 @@ export function toolList(): ToolDef[] {
           encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
         });
         const disk = new BitrixDiskService(client);
-
-        if (input.text_content !== undefined) {
-          if (!input.filename) throw new Error("filename is required when using text_content");
-          return {
-            connectionId,
-            res: await disk.createTextFile({
-              folderId: input.folder_id,
-              filename: input.filename,
-              content: input.text_content
-            })
-          };
-        }
-
-        if (input.base64_content !== undefined) {
-          if (!input.filename) throw new Error("filename is required when using base64_content");
-          return {
-            connectionId,
-            res: await disk.uploadBase64File({
-              folderId: input.folder_id,
-              filename: input.filename,
-              base64Content: input.base64_content
-            })
-          };
-        }
-
-        if (!input.local_path) {
-          throw new Error("Provide one of local_path, text_content, or base64_content");
-        }
-
-        return {
-          connectionId,
-          res: await disk.folderUploadFile({
-            folderId: input.folder_id,
-            localPath: input.local_path,
-            filename: input.filename
-          })
-        };
-      }
-    },
-    {
-      name: "bitrix_disk_file_create_text",
-      description: "Create a text file in Bitrix Disk folder from provided content. Useful for txt/csv/json/md reports. Requires confirm=true.",
-      risky: true,
-      inputSchema: z
-        .object({
-          folder_id: z.number().int().positive(),
-          filename: z.string().min(1),
-          content: z.string()
-        })
-        .merge(baseInput),
-      handler: async (ctx, input) => {
-        requireConfirm("bitrix_disk_file_create_text", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
-        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
-        const { client } = await createBitrixClientForConnection({
-          pool: ctx.pool,
-          logger: ctx.logger,
-          connectionId,
-          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
-        });
-        const disk = new BitrixDiskService(client);
-        return {
-          connectionId,
-          res: await disk.createTextFile({
-            folderId: input.folder_id,
-            filename: input.filename,
-            content: input.content
-          })
-        };
-      }
-    },
-    {
-      name: "bitrix_disk_file_upload_base64",
-      description: "Upload a binary file to Bitrix Disk folder from base64 content. Useful for xlsx/pdf/docx/zip. Requires confirm=true.",
-      risky: true,
-      inputSchema: z
-        .object({
-          folder_id: z.number().int().positive(),
-          filename: z.string().min(1),
-          base64_content: z.string().min(1)
-        })
-        .merge(baseInput),
-      handler: async (ctx, input) => {
-        requireConfirm("bitrix_disk_file_upload_base64", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
-        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
-        const { client } = await createBitrixClientForConnection({
-          pool: ctx.pool,
-          logger: ctx.logger,
-          connectionId,
-          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
-        });
-        const disk = new BitrixDiskService(client);
-        return {
-          connectionId,
-          res: await disk.uploadBase64File({
-            folderId: input.folder_id,
-            filename: input.filename,
-            base64Content: input.base64_content
-          })
-        };
+        return { connectionId, res: await disk.folderUploadFile({ folderId: input.folder_id, localPath: input.local_path, filename: input.filename }) };
       }
     },
     {

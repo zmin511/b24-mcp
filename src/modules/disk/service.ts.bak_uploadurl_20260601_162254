@@ -72,69 +72,16 @@ export class BitrixDiskService {
   }
 
   async uploadBufferToFolder(params: { folderId: number; buffer: Buffer; filename: string }) {
-    // Bitrix Disk upload is often a two-step flow:
-    // 1. disk.folder.uploadfile returns uploadUrl + field
-    // 2. upload the actual file to uploadUrl as multipart/form-data
-    const init: any = await this.client.call("disk.folder.uploadfile", {
-      id: params.folderId,
-      data: { NAME: params.filename },
-      generateUniqueName: true
-    } as any);
-
-    const payload = init?.result ?? init;
-    const uploadUrl = payload?.uploadUrl ?? payload?.UPLOAD_URL ?? payload?.url;
-    const field = payload?.field ?? payload?.FIELD ?? "file";
-
-    if (!uploadUrl) {
-      // Some portals/method wrappers may support direct multipart.
-      // Keep fallback for compatibility.
-      return this.client.callMultipart(
-        "disk.folder.uploadfile",
-        {
-          id: params.folderId,
-          data: { NAME: params.filename },
-          generateUniqueName: true
-        },
-        {
-          file: { buffer: params.buffer, filename: params.filename }
-        }
-      );
-    }
-
-    const form = new FormData();
-
-    const arrayBuffer = params.buffer.buffer.slice(
-      params.buffer.byteOffset,
-      params.buffer.byteOffset + params.buffer.byteLength
-    ) as ArrayBuffer;
-
-    const blob = new Blob([arrayBuffer]);
-    form.append(field, blob, params.filename);
-
-    const uploadRes = await fetch(uploadUrl, {
-      method: "POST",
-      body: form
-    });
-
-    const text = await uploadRes.text();
-
-    let parsed: any;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = { raw: text };
-    }
-
-    if (!uploadRes.ok) {
-      throw new Error(
-        `Bitrix Disk uploadUrl failed: HTTP ${uploadRes.status} ${uploadRes.statusText}; ${text.slice(0, 1000)}`
-      );
-    }
-
-    return {
-      init,
-      upload: parsed
-    };
+    return this.client.callMultipart(
+      "disk.folder.uploadfile",
+      {
+        id: params.folderId,
+        data: { NAME: params.filename }
+      },
+      {
+        file: { buffer: params.buffer, filename: params.filename }
+      }
+    );
   }
 
   async createTextFile(params: { folderId: number; filename: string; content: string; encoding?: BufferEncoding }) {
