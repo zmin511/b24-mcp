@@ -64,6 +64,7 @@ export class BitrixRestClient {
       for (const [key, value] of Object.entries(params)) {
         appendFormValue(body, key, value);
       }
+      if (this.auth.type === "oauth") body.set("auth", this.auth.accessToken);
 
       const headers: Record<string, string> = {
         "content-type": "application/x-www-form-urlencoded"
@@ -130,6 +131,7 @@ export class BitrixRestClient {
         if (value === undefined) continue;
         form.set(key, typeof value === "string" ? value : JSON.stringify(value));
       }
+      if (this.auth.type === "oauth") form.set("auth", this.auth.accessToken);
       for (const [field, f] of Object.entries(files)) {
         const part = new Uint8Array(f.buffer);
         const file = new File([part], f.filename, f.contentType ? { type: f.contentType } : undefined);

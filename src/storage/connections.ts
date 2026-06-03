@@ -10,6 +10,12 @@ export type BitrixConnectionRow = {
   oauth_expires_at: Date | null;
 };
 
+export type OAuthTokenUpdate = {
+  accessTokenEnc: string;
+  refreshTokenEnc?: string | null;
+  expiresAt?: Date | null;
+};
+
 export async function getConnectionById(pool: DbPool, id: string): Promise<BitrixConnectionRow | null> {
   const res = await pool.query(
     `select id, portal_url, auth_type, webhook_url, oauth_access_token_enc, oauth_refresh_token_enc, oauth_expires_at
@@ -47,3 +53,23 @@ export async function upsertConnection(
   );
 }
 
+export async function updateConnectionOAuthTokens(
+  pool: DbPool,
+  connectionId: string,
+  update: OAuthTokenUpdate
+) {
+  await pool.query(
+    `update bitrix_connections
+     set oauth_access_token_enc = $2,
+         oauth_refresh_token_enc = coalesce($3, oauth_refresh_token_enc),
+         oauth_expires_at = $4,
+         updated_at = now()
+     where id = $1`,
+    [
+      connectionId,
+      update.accessTokenEnc,
+      update.refreshTokenEnc ?? null,
+      update.expiresAt ?? null
+    ]
+  );
+}
