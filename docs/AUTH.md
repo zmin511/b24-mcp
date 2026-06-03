@@ -71,5 +71,10 @@ The plaintext token is not stored. The database stores only `sha256(token)`.
 
 ## Current limitation
 
-Self-service OAuth login is not implemented yet. For now an admin creates the user's Bitrix connection and MCP access token. OAuth can be added later as a `/oauth/bitrix/start` and `/oauth/bitrix/callback` flow that creates the same records automatically.
+Self-service OAuth login is available through:
+
+- `GET /oauth/bitrix/start`
+- `GET /oauth/bitrix/callback`
+
+For Bitrix24 app setup instructions, see `docs/BITRIX_OAUTH_SETUP.md`.
 

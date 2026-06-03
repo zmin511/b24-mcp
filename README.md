@@ -28,6 +28,7 @@ Production-ready MVP MCP server for Bitrix24 with:
 This MVP stores connections in Postgres (`bitrix_connections`). Add one connection with a webhook:
 - Tool: `bitrix_connection_upsert` (requires `confirm=true`)
 - Per-user MCP tokens can be mapped to personal Bitrix connections; see `docs/AUTH.md`.
+- Self-service Bitrix OAuth login is available; see `docs/BITRIX_OAUTH_SETUP.md`.
 
 ## Deploy on Ubuntu (example: your-mcp-domain.example.com)
 - Run with docker-compose, expose port `7010` to localhost only, then proxy via Nginx/Caddy to `https://your-mcp-domain.example.com/b24/mcp`
