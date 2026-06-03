@@ -4,3 +4,18 @@ dist/
 .env.*.local
 npm-debug.log*
 
+
+# Local secrets
+.env
+.env.*
+!.env.example
+config_secrets.json
+*.secret
+*.key
+*.pem
+
+# Local/runtime
+node_modules/
+dist/
+backups/
+*.log
