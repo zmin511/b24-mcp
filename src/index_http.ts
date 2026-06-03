@@ -4,9 +4,57 @@ import { loadConfig } from "./common/config.js";
 import { createLogger } from "./common/logger.js";
 import { createPool } from "./storage/db.js";
 import { createMcpServer } from "./mcp/server.js";
+import type { RequestAuth } from "./mcp/server.js";
 import { runMigrations } from "./storage/migrate.js";
+import { findMcpAccessToken } from "./storage/mcpAccessTokens.js";
 
-type AuthedRequest = express.Request & { auth?: { token?: string } };
+type AuthedRequest = express.Request & { auth?: RequestAuth };
+
+function getHeaderValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function extractMcpToken(req: express.Request): { token?: string; source: string } {
+  const authorization = getHeaderValue(req.headers.authorization);
+
+  if (authorization) {
+    const trimmed = authorization.trim();
+    if (trimmed.toLowerCase().startsWith("bearer ")) {
+      return { token: trimmed.slice(7).trim(), source: "authorization" };
+    }
+    return { token: trimmed, source: "authorization" };
+  }
+
+  const headerCandidates: Array<[string, string | undefined]> = [
+    ["x-api-key", getHeaderValue(req.headers["x-api-key"])],
+    ["api-key", getHeaderValue(req.headers["api-key"])],
+    ["apikey", getHeaderValue(req.headers["apikey"])],
+    ["openai-api-key", getHeaderValue(req.headers["openai-api-key"])],
+    ["x-mcp-token", getHeaderValue(req.headers["x-mcp-token"])]
+  ];
+
+  for (const [source, value] of headerCandidates) {
+    const token = value?.trim();
+    if (token) return { token, source };
+  }
+
+  return { source: "none" };
+}
+
+function isDiscoveryRequest(req: express.Request): boolean {
+  const rpcMethod = req.body?.method;
+  return (
+    req.method === "POST" &&
+    (
+      rpcMethod === "initialize" ||
+      rpcMethod === "tools/list" ||
+      rpcMethod === "resources/list" ||
+      rpcMethod === "ping" ||
+      rpcMethod === "notifications/initialized"
+    )
+  );
+}
 
 async function main() {
   const config = loadConfig();
@@ -22,90 +70,28 @@ async function main() {
   const app = express();
   app.use(express.json({ limit: "10mb" }));
 
-  app.use((req, res, next) => {
+  app.use(async (req, res, next) => {
     const rpcMethod = req.body?.method;
-    const userAgent = String(req.headers["user-agent"] || "");
-    const isOpenAiMcp = userAgent.includes("openai-mcp");
+    const discovery = isDiscoveryRequest(req);
 
-    // ChatGPT currently refreshes actions and calls tools without forwarding the user API key.
-    // For this internal connector we allow OpenAI MCP traffic through.
-    // Non-OpenAI clients still need MCP_AUTH_TOKEN.
-    if (isOpenAiMcp) {
-      logger.info(
-        {
-          method: req.method,
-          path: req.path,
-          rpcMethod,
-          userAgent,
-          authBypassForOpenAiMcp: true
-        },
-        "MCP auth bypass/openai"
-      );
+    if (req.path === "/healthz") {
       return next();
     }
 
-    // Also allow unauthenticated local/discovery metadata calls.
-    const isDiscoveryRequest =
-      req.method === "POST" &&
-      (
-        rpcMethod === "initialize" ||
-        rpcMethod === "tools/list" ||
-        rpcMethod === "resources/list" ||
-        rpcMethod === "ping" ||
-        rpcMethod === "notifications/initialized"
-      );
-
-    if (!config.MCP_AUTH_TOKEN || isDiscoveryRequest) {
+    if (discovery) {
       logger.info(
         {
           method: req.method,
           path: req.path,
           rpcMethod,
-          authSkippedForDiscovery: isDiscoveryRequest
+          authSkippedForDiscovery: true
         },
         "MCP auth bypass/discovery"
       );
       return next();
     }
 
-    const getHeaderValue = (value: string | string[] | undefined): string | undefined => {
-      if (Array.isArray(value)) return value[0];
-      return value;
-    };
-
-    const extractMcpToken = (): string | undefined => {
-      const authorization = getHeaderValue(req.headers.authorization);
-
-      if (authorization) {
-        const trimmed = authorization.trim();
-
-        if (trimmed.toLowerCase().startsWith("bearer ")) {
-          return trimmed.slice(7).trim();
-        }
-
-        return trimmed;
-      }
-
-      return (
-        getHeaderValue(req.headers["x-api-key"]) ||
-        getHeaderValue(req.headers["api-key"]) ||
-        getHeaderValue(req.headers["apikey"]) ||
-        getHeaderValue(req.headers["openai-api-key"]) ||
-        getHeaderValue(req.headers["x-mcp-token"])
-      )?.trim();
-    };
-
-    const tokenSource = (() => {
-      if (req.headers.authorization) return "authorization";
-      if (req.headers["x-api-key"]) return "x-api-key";
-      if (req.headers["api-key"]) return "api-key";
-      if (req.headers["apikey"]) return "apikey";
-      if (req.headers["openai-api-key"]) return "openai-api-key";
-      if (req.headers["x-mcp-token"]) return "x-mcp-token";
-      return "none";
-    })();
-
-    const providedToken = extractMcpToken();
+    const { token: providedToken, source: tokenSource } = extractMcpToken(req);
 
     logger.info(
       {
@@ -114,7 +100,6 @@ async function main() {
         rpcMethod,
         tokenSource,
         providedTokenLength: providedToken?.length ?? 0,
-        expectedTokenLength: config.MCP_AUTH_TOKEN.length,
         hasAuthorization: Boolean(req.headers.authorization),
         hasXApiKey: Boolean(req.headers["x-api-key"]),
         hasApiKey: Boolean(req.headers["api-key"]),
@@ -124,20 +109,41 @@ async function main() {
       "MCP auth debug"
     );
 
-    if (!providedToken || providedToken !== config.MCP_AUTH_TOKEN) {
+    try {
+      if (providedToken && config.MCP_AUTH_TOKEN && providedToken === config.MCP_AUTH_TOKEN) {
+        (req as AuthedRequest).auth = { kind: "admin", tokenSource, actor: "admin-token" };
+        return next();
+      }
+
+      if (providedToken) {
+        const tokenRow = await findMcpAccessToken(pool, providedToken);
+        if (tokenRow) {
+          (req as AuthedRequest).auth = {
+            kind: "user",
+            tokenSource,
+            connectionId: tokenRow.bitrix_connection_id,
+            actor: tokenRow.actor_name ?? tokenRow.label,
+            accessTokenId: tokenRow.id,
+            bitrixUserId: tokenRow.bitrix_user_id ?? undefined
+          };
+          return next();
+        }
+      }
+
       res.status(401).json({ error: "unauthorized" });
       return;
+    } catch (err) {
+      logger.error({ err }, "MCP auth failed");
+      res.status(500).json({ error: "auth_failed" });
+      return;
     }
-
-    (req as AuthedRequest).auth = { token: "ok" };
-    next();
   });
 
   app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 
   app.all("/mcp", async (req, res) => {
     try {
-      const { server } = createMcpServer({ config, logger, pool });
+      const { server } = createMcpServer({ config, logger, pool, requestAuth: (req as AuthedRequest).auth });
 
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined

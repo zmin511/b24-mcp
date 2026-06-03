@@ -18,11 +18,17 @@ import { jsonResult } from "./types.js";
 import { requireConfirm, redactSecrets } from "./safety.js";
 import { writeAuditLog } from "../storage/audit.js";
 import { upsertConnection } from "../storage/connections.js";
+import { upsertMcpAccessToken } from "../storage/mcpAccessTokens.js";
 import { encryptString } from "../common/crypto.js";
 import { syncRecentTasks } from "../jobs/syncRecentTasks.js";
 import { syncTaskById } from "../jobs/syncTaskById.js";
+import { AppError } from "../common/errors.js";
 
-export type Ctx = { config: AppConfig; pool: DbPool; logger: Logger };
+export type RequestAuth =
+  | { kind: "admin"; tokenSource: string; actor?: string }
+  | { kind: "user"; tokenSource: string; connectionId: string; actor?: string; accessTokenId: string; bitrixUserId?: number };
+
+export type Ctx = { config: AppConfig; pool: DbPool; logger: Logger; requestAuth?: RequestAuth };
 
 type ToolDef = {
   name: string;
@@ -36,6 +42,21 @@ const baseInput = z.object({
   connection_id: z.string().optional(),
   confirm: z.boolean().optional()
 });
+
+function resolveConnectionId(ctx: Ctx, input: any): string {
+  if (ctx.requestAuth?.kind === "user") return ctx.requestAuth.connectionId;
+  return input?.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+}
+
+function withResolvedConnection(ctx: Ctx, input: any) {
+  return { ...input, connection_id: resolveConnectionId(ctx, input) };
+}
+
+function requireAdmin(ctx: Ctx, tool: string) {
+  if (ctx.requestAuth?.kind === "user") {
+    throw new AppError(`Tool '${tool}' requires an admin MCP token`, "ADMIN_REQUIRED", { status: 403 });
+  }
+}
 
 export function toolList(): ToolDef[] {
   return [
@@ -73,6 +94,7 @@ export function toolList(): ToolDef[] {
         })
         .merge(baseInput),
       handler: async (ctx, input) => {
+        requireAdmin(ctx, "bitrix_connection_upsert");
         requireConfirm("bitrix_connection_upsert", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
         const encKey = ctx.config.APP_ENCRYPTION_KEY_BASE64;
         const accessEnc = input.oauth_access_token ? encryptString(input.oauth_access_token, encKey) : null;
@@ -88,6 +110,44 @@ export function toolList(): ToolDef[] {
           oauth_expires_at: expiresAt
         } as any);
         return { ok: true, id: input.id };
+      }
+    },
+    {
+      name: "bitrix_mcp_access_token_upsert",
+      description: "Create/update a per-user MCP access token mapped to a Bitrix connection. Requires admin token and confirm=true.",
+      risky: true,
+      inputSchema: z
+        .object({
+          id: z.string().min(1),
+          token: z.string().min(16),
+          label: z.string().min(1),
+          bitrix_connection_id: z.string().min(1),
+          bitrix_user_id: z.number().int().positive().optional(),
+          actor_name: z.string().optional(),
+          active: z.boolean().optional()
+        })
+        .merge(baseInput),
+      handler: async (ctx, input) => {
+        requireAdmin(ctx, "bitrix_mcp_access_token_upsert");
+        requireConfirm("bitrix_mcp_access_token_upsert", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
+        await upsertMcpAccessToken({
+          pool: ctx.pool,
+          id: input.id,
+          token: input.token,
+          label: input.label,
+          bitrixConnectionId: input.bitrix_connection_id,
+          bitrixUserId: input.bitrix_user_id,
+          actorName: input.actor_name,
+          active: input.active ?? true
+        });
+        return {
+          ok: true,
+          id: input.id,
+          label: input.label,
+          bitrixConnectionId: input.bitrix_connection_id,
+          active: input.active ?? true,
+          note: "Token stored as SHA-256 hash; plaintext token is not returned by the server."
+        };
       }
     },
     {
@@ -1099,11 +1159,13 @@ export function createMcpServer(ctx: Ctx) {
     const tool = tools.find((t) => t.name === req.params.name);
     if (!tool) return { content: [{ type: "text", text: `Unknown tool: ${req.params.name}` }], isError: true };
 
-    const connectionId = (req.params.arguments as any)?.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
-    const actor = (req as any)?.meta?.client ?? undefined;
+    const rawArgs = req.params.arguments ?? {};
+    let connectionId = resolveConnectionId(ctx, rawArgs);
+    const actor = ctx.requestAuth?.actor ?? (req as any)?.meta?.client ?? undefined;
 
     try {
-      const input = tool.inputSchema.parse(req.params.arguments ?? {});
+      const input = withResolvedConnection(ctx, tool.inputSchema.parse(rawArgs));
+      connectionId = input.connection_id;
       const result = await tool.handler(ctx, input);
       if (tool.risky) {
         await writeAuditLog({
@@ -1132,7 +1194,7 @@ export function createMcpServer(ctx: Ctx) {
           tool: tool.name,
           risky: true,
           actor,
-          request: redactSecrets(req.params.arguments ?? {}),
+          request: redactSecrets(rawArgs),
           result: errJson
         });
       }
