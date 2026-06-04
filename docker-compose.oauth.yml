@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: b24-mcp-oauth-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: b24_mcp
+      POSTGRES_USER: b24_mcp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - b24_mcp_oauth_pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U b24_mcp -d b24_mcp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: .
+    image: b24-mcp-oauth-app:latest
+    container_name: b24-mcp-oauth-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      LOG_LEVEL: ${LOG_LEVEL}
+      DATABASE_URL: ${DATABASE_URL}
+      APP_ENCRYPTION_KEY_BASE64: ${APP_ENCRYPTION_KEY_BASE64}
+      BITRIX_DEFAULT_CONNECTION_ID: ${BITRIX_DEFAULT_CONNECTION_ID}
+      BITRIX_OAUTH_PORTAL_URL: ${BITRIX_OAUTH_PORTAL_URL}
+      BITRIX_OAUTH_CLIENT_ID: ${BITRIX_OAUTH_CLIENT_ID}
+      BITRIX_OAUTH_CLIENT_SECRET: ${BITRIX_OAUTH_CLIENT_SECRET}
+      BITRIX_OAUTH_REDIRECT_URI: ${BITRIX_OAUTH_REDIRECT_URI}
+      JOBS_ENABLED: ${JOBS_ENABLED}
+      JOBS_POLL_INTERVAL_SEC: ${JOBS_POLL_INTERVAL_SEC}
+      MCP_HTTP_ENABLED: ${MCP_HTTP_ENABLED}
+      MCP_HTTP_HOST: ${MCP_HTTP_HOST}
+      MCP_HTTP_PORT: ${MCP_HTTP_PORT}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN}
+      ALLOW_UNCONFIRMED_WRITES: ${ALLOW_UNCONFIRMED_WRITES}
+    command: ["npm","run","start:http"]
+    ports:
+      - "127.0.0.1:7020:7020"
+
+volumes:
+  b24_mcp_oauth_pgdata:
