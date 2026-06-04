@@ -56,14 +56,54 @@ export class BitrixTasksService {
       }
     }
 
+    let chatError: any;
+
     if (resolvedChatId && hasMethod(this.caps, "im.dialog.messages.get")) {
-      const chatRes = await this.client.call<any>("im.dialog.messages.get", { dialog_id: String(resolvedChatId) });
-      return { source: "chat" as const, messages: normalizeChatMessages(taskId, chatRes.result ?? chatRes) };
+      try {
+        const chatRes = await this.client.call<any>("im.dialog.messages.get", { dialog_id: String(resolvedChatId) });
+        return { source: "chat" as const, messages: normalizeChatMessages(taskId, chatRes.result ?? chatRes) };
+      } catch (err: any) {
+        chatError = err;
+        // Some Bitrix24 task cards expose comments counters and chatId,
+        // but deny direct IM dialog access. In that case continue to legacy task comments.
+      }
     }
 
     if (hasMethod(this.caps, "task.commentitem.getlist")) {
-      const legacy = await this.client.call<any>("task.commentitem.getlist", { TASKID: taskId });
-      return { source: "legacy" as const, messages: normalizeLegacyComments(taskId, legacy.result ?? legacy) };
+      try {
+        const legacy = await this.client.call<any>("task.commentitem.getlist", { TASKID: taskId });
+        return {
+          source: chatError ? ("legacy_after_chat_denied" as const) : ("legacy" as const),
+          chatError: chatError
+            ? {
+                code: chatError?.code,
+                message: chatError?.message,
+                details: chatError?.details
+              }
+            : undefined,
+          messages: normalizeLegacyComments(taskId, legacy.result ?? legacy)
+        };
+      } catch (legacyError: any) {
+        if (chatError) {
+          throw new AppError("Unable to read task comments via chat or legacy API", "TASK_COMMENTS_ACCESS_DENIED", {
+            status: 403,
+            details: {
+              chatError: {
+                code: chatError?.code,
+                message: chatError?.message,
+                details: chatError?.details
+              },
+              legacyError: {
+                code: legacyError?.code,
+                message: legacyError?.message,
+                details: legacyError?.details
+              }
+            }
+          });
+        }
+
+        throw legacyError;
+      }
     }
 
     throw new AppError("No supported API for task comments in this portal", "NOT_SUPPORTED", { status: 400 });

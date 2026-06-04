@@ -28,6 +28,11 @@ function getHeaderValue(value: string | string[] | undefined): string | undefine
 }
 
 function extractMcpToken(req: express.Request): { token?: string; source: string } {
+  const pathTokenMatch = req.path.match(/^\/t\/([^/]+)\/mcp$/);
+  if (pathTokenMatch?.[1]) {
+    return { token: decodeURIComponent(pathTokenMatch[1]), source: "path-token" };
+  }
+
   const authorization = getHeaderValue(req.headers.authorization);
 
   if (authorization) {
@@ -52,6 +57,10 @@ function extractMcpToken(req: express.Request): { token?: string; source: string
   }
 
   return { source: "none" };
+}
+
+function isMcpRequestPath(pathname: string): boolean {
+  return pathname === "/mcp" || /^\/t\/[^/]+\/mcp$/.test(pathname);
 }
 
 function isDiscoveryRequest(req: express.Request): boolean {
@@ -249,6 +258,19 @@ async function main() {
       return next();
     }
 
+    if (isMcpRequestPath(req.path) && ["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+      logger.info(
+        {
+          method: req.method,
+          path: req.path,
+          rpcMethod,
+          authSkippedForDiscovery: true
+        },
+        "MCP auth bypass/discovery"
+      );
+      return next();
+    }
+
     if (discovery) {
       logger.info(
         {
@@ -312,7 +334,7 @@ async function main() {
 
   app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 
-  app.all("/mcp", async (req, res) => {
+  app.all(/^\/(?:t\/[^/]+\/)?mcp$/, async (req, res) => {
     try {
       const { server } = createMcpServer({ config, logger, pool, requestAuth: (req as AuthedRequest).auth });
 

@@ -1150,7 +1150,11 @@ export function createMcpServer(ctx: Ctx) {
       tools: tools.map((t) => ({
         name: t.name,
         description: t.description,
-        inputSchema: zodToJsonSchema(t.inputSchema, { name: `${t.name}_input` })
+        inputSchema: (() => {
+          const schema = zodToJsonSchema(t.inputSchema, { $refStrategy: "none" }) as any;
+          delete schema.$schema;
+          return schema;
+        })()
       }))
     };
   });

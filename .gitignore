@@ -27,3 +27,6 @@ backups/
 *.backup
 *.tmp
 *.old
+
+# Local disabled compose overrides
+docker-compose.override.yml.disabled
