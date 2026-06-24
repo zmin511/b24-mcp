@@ -14,6 +14,7 @@ import { BitrixBizprocService } from "../modules/bizproc/service.js";
 import { BitrixUsersService } from "../modules/users/service.js";
 import { ReportsService } from "../modules/reports/service.js";
 import { BitrixImService } from "../modules/im/service.js";
+import { BitrixCrmService } from "../modules/crm/service.js";
 import { jsonResult } from "./types.js";
 import { requireConfirm, redactSecrets } from "./safety.js";
 import { writeAuditLog } from "../storage/audit.js";
@@ -296,6 +297,95 @@ export function toolList(): ToolDef[] {
         });
         const tasks = new BitrixTasksService(client, capabilities);
         return { connectionId, res: await tasks.taskCreate(input.fields) };
+      }
+    },
+    {
+      name: "bitrix_crm_deal_create",
+      description: "Create CRM deal via crm.deal.add. Requires confirm=true.",
+      risky: true,
+      inputSchema: z.object({
+        fields: z.record(z.any()),
+        params: z.record(z.any()).optional()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        requireConfirm("bitrix_crm_deal_create", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const crm = new BitrixCrmService(client);
+        return { connectionId, res: await crm.dealAdd(input.fields, input.params) };
+      }
+    },
+    {
+      name: "bitrix_crm_deal_get",
+      description: "Get CRM deal by id via crm.deal.get.",
+      risky: false,
+      inputSchema: z.object({ id: z.number().int().positive() }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const crm = new BitrixCrmService(client);
+        return { connectionId, res: await crm.dealGet(input.id) };
+      }
+    },
+    {
+      name: "bitrix_crm_deal_fields",
+      description: "Get CRM deal fields metadata via crm.deal.fields.",
+      risky: false,
+      inputSchema: baseInput,
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const crm = new BitrixCrmService(client);
+        return { connectionId, res: await crm.dealFields() };
+      }
+    },
+    {
+      name: "bitrix_crm_deal_category_list",
+      description: "List CRM deal categories via crm.dealcategory.list.",
+      risky: false,
+      inputSchema: z.object({ params: z.record(z.any()).default({}) }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const crm = new BitrixCrmService(client);
+        return { connectionId, res: await crm.dealCategoryList(input.params) };
+      }
+    },
+    {
+      name: "bitrix_crm_deal_stage_list",
+      description: "List CRM deal stages via crm.status.list for DEAL_STAGE category.",
+      risky: false,
+      inputSchema: z.object({ entity_id: z.string().min(1) }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const crm = new BitrixCrmService(client);
+        return { connectionId, res: await crm.dealStageList(input.entity_id) };
       }
     },
     {
@@ -910,6 +1000,49 @@ export function toolList(): ToolDef[] {
       }
     },
     {
+      name: "bitrix_rest_call_readonly",
+      description: "Diagnostic read-only Bitrix REST call. Blocks mutating methods like add/update/delete/set.",
+      risky: false,
+      inputSchema: z.object({
+        method: z.string().min(1),
+        params: z.record(z.any()).optional()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const method = String(input.method);
+        const lower = method.toLowerCase();
+
+        const forbiddenParts = [
+          ".add",
+          ".update",
+          ".delete",
+          ".remove",
+          ".set",
+          ".bind",
+          ".unbind",
+          ".start",
+          ".complete",
+          ".send",
+          ".upload",
+          ".move",
+          ".copy"
+        ];
+
+        if (forbiddenParts.some((part) => lower.includes(part))) {
+          throw new AppError(`Method '${method}' is not allowed in read-only diagnostic tool`, "READONLY_METHOD_FORBIDDEN", { status: 403 });
+        }
+
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+
+        return { connectionId, method, res: await client.call(method, input.params ?? {}) };
+      }
+    },
+    {
       name: "bitrix_kb_site_list",
       description: "List knowledge base sites (landing TYPE=KNOWLEDGE).",
       risky: false,
@@ -924,6 +1057,74 @@ export function toolList(): ToolDef[] {
         });
         const kb = new BitrixKnowledgeService(client);
         return { connectionId, res: await kb.kbSiteList() };
+      }
+    },
+    {
+      name: "bitrix_kb_site_list_raw",
+      description: "List all Bitrix landing sites without TYPE filter. Useful for diagnosing knowledge base IDs.",
+      risky: false,
+      inputSchema: baseInput,
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const kb = new BitrixKnowledgeService(client);
+        return { connectionId, res: await kb.kbSiteListRaw() };
+      }
+    },
+    {
+      name: "bitrix_kb_page_list_full",
+      description: "List knowledge base landing pages for a site with extended metadata.",
+      risky: false,
+      inputSchema: z.object({ site_id: z.number().int().positive() }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const kb = new BitrixKnowledgeService(client);
+        return { connectionId, res: await kb.kbPageListFull(input.site_id) };
+      }
+    },
+    {
+      name: "bitrix_kb_page_find_by_id",
+      description: "Find a knowledge base landing page by landing/page ID.",
+      risky: false,
+      inputSchema: z.object({ page_id: z.number().int().positive() }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const kb = new BitrixKnowledgeService(client);
+        return { connectionId, res: await kb.kbPageFindById(input.page_id) };
+      }
+    },
+    {
+      name: "bitrix_kb_find_by_url",
+      description: "Diagnose Bitrix knowledge base URL and find candidate site/page IDs.",
+      risky: false,
+      inputSchema: z.object({ url: z.string().min(1) }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const kb = new BitrixKnowledgeService(client);
+        return { connectionId, res: await kb.kbFindByUrl(input.url) };
       }
     },
     {
