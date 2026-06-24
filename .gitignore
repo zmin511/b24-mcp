@@ -30,3 +30,9 @@ backups/
 
 # Local disabled compose overrides
 docker-compose.override.yml.disabled
+
+# Local build workaround files
+Dockerfile.localbuild
+Dockerfile.bak_*
+node_modules/
+dist/
