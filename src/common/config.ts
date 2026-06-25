@@ -16,7 +16,11 @@ const envSchema = z.object({
   MCP_HTTP_ENABLED: booleanFromEnv.optional().default("true"),
   MCP_HTTP_HOST: z.string().optional().default("127.0.0.1"),
   MCP_HTTP_PORT: z.coerce.number().int().positive().optional().default(7010),
-  MCP_AUTH_TOKEN: z.string().optional().default("")
+  MCP_AUTH_TOKEN: z.string().optional().default(""),
+  BITRIX_OAUTH_PORTAL_URL: z.string().optional().default(""),
+  BITRIX_OAUTH_CLIENT_ID: z.string().optional().default(""),
+  BITRIX_OAUTH_CLIENT_SECRET: z.string().optional().default(""),
+  BITRIX_OAUTH_REDIRECT_URI: z.string().optional().default("")
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

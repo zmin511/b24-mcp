@@ -7,6 +7,18 @@ import { createMcpServer } from "./mcp/server.js";
 import type { RequestAuth } from "./mcp/server.js";
 import { runMigrations } from "./storage/migrate.js";
 import { findMcpAccessToken } from "./storage/mcpAccessTokens.js";
+import { createOAuthState, consumeOAuthState } from "./storage/oauthStates.js";
+import { upsertConnection } from "./storage/connections.js";
+import { upsertMcpAccessToken } from "./storage/mcpAccessTokens.js";
+import { encryptString } from "./common/crypto.js";
+import {
+  buildBitrixAuthorizeUrl,
+  exchangeBitrixOAuthCode,
+  getBitrixTokenExpiresAt,
+  getPortalUrlFromOAuth,
+  randomUrlToken
+} from "./bitrix/oauth/service.js";
+import { BitrixRestClient } from "./bitrix/http/client.js";
 
 type AuthedRequest = express.Request & { auth?: RequestAuth };
 
@@ -16,6 +28,11 @@ function getHeaderValue(value: string | string[] | undefined): string | undefine
 }
 
 function extractMcpToken(req: express.Request): { token?: string; source: string } {
+  const pathTokenMatch = req.path.match(/^\/t\/([^/]+)\/mcp$/);
+  if (pathTokenMatch?.[1]) {
+    return { token: decodeURIComponent(pathTokenMatch[1]), source: "path-token" };
+  }
+
   const authorization = getHeaderValue(req.headers.authorization);
 
   if (authorization) {
@@ -42,6 +59,10 @@ function extractMcpToken(req: express.Request): { token?: string; source: string
   return { source: "none" };
 }
 
+function isMcpRequestPath(pathname: string): boolean {
+  return pathname === "/mcp" || /^\/t\/[^/]+\/mcp$/.test(pathname);
+}
+
 function isDiscoveryRequest(req: express.Request): boolean {
   const rpcMethod = req.body?.method;
   return (
@@ -54,6 +75,49 @@ function isDiscoveryRequest(req: express.Request): boolean {
       rpcMethod === "notifications/initialized"
     )
   );
+}
+
+function requireOAuthConfig(config: ReturnType<typeof loadConfig>) {
+  const missing = [
+    ["BITRIX_OAUTH_PORTAL_URL", config.BITRIX_OAUTH_PORTAL_URL],
+    ["BITRIX_OAUTH_CLIENT_ID", config.BITRIX_OAUTH_CLIENT_ID],
+    ["BITRIX_OAUTH_CLIENT_SECRET", config.BITRIX_OAUTH_CLIENT_SECRET],
+    ["BITRIX_OAUTH_REDIRECT_URI", config.BITRIX_OAUTH_REDIRECT_URI],
+    ["APP_ENCRYPTION_KEY_BASE64", config.APP_ENCRYPTION_KEY_BASE64]
+  ].filter(([, value]) => !value);
+
+  if (missing.length > 0) {
+    throw new Error(`Missing OAuth config: ${missing.map(([name]) => name).join(", ")}`);
+  }
+}
+
+function sanitizeIdPart(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+}
+
+function htmlResponse(title: string, body: string) {
+  return `<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; max-width: 760px; margin: 48px auto; padding: 0 20px; line-height: 1.5; }
+    code, pre { background: #f4f4f5; border-radius: 6px; padding: 2px 6px; }
+    pre { padding: 16px; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>${body}</body>
+</html>`;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 async function main() {
@@ -70,11 +134,140 @@ async function main() {
   const app = express();
   app.use(express.json({ limit: "10mb" }));
 
+  app.get("/oauth/bitrix/start", async (req, res) => {
+    try {
+      requireOAuthConfig(config);
+      const state = randomUrlToken(24);
+      const label = typeof req.query.label === "string" ? req.query.label : undefined;
+      const portalUrl =
+        typeof req.query.portal_url === "string" && req.query.portal_url
+          ? req.query.portal_url
+          : config.BITRIX_OAUTH_PORTAL_URL;
+
+      await createOAuthState({
+        pool,
+        state,
+        provider: "bitrix",
+        portalUrl,
+        label,
+        ttlMinutes: 15
+      });
+
+      res.redirect(
+        buildBitrixAuthorizeUrl({
+          portalUrl,
+          clientId: config.BITRIX_OAUTH_CLIENT_ID,
+          redirectUri: config.BITRIX_OAUTH_REDIRECT_URI,
+          state
+        })
+      );
+    } catch (err) {
+      logger.error({ err }, "bitrix_oauth_start_failed");
+      res.status(500).send(htmlResponse("OAuth error", `<h1>OAuth error</h1><p>${escapeHtml(err instanceof Error ? err.message : String(err))}</p>`));
+    }
+  });
+
+  app.get("/oauth/bitrix/callback", async (req, res) => {
+    try {
+      requireOAuthConfig(config);
+      const code = typeof req.query.code === "string" ? req.query.code : "";
+      const state = typeof req.query.state === "string" ? req.query.state : "";
+      if (!code || !state) {
+        res.status(400).send(htmlResponse("OAuth error", "<h1>OAuth error</h1><p>Missing code or state.</p>"));
+        return;
+      }
+
+      const stateRow = await consumeOAuthState(pool, state, "bitrix");
+      if (!stateRow) {
+        res.status(400).send(htmlResponse("OAuth error", "<h1>OAuth error</h1><p>OAuth state is invalid, expired, or already used.</p>"));
+        return;
+      }
+
+      const token = await exchangeBitrixOAuthCode({
+        clientId: config.BITRIX_OAUTH_CLIENT_ID,
+        clientSecret: config.BITRIX_OAUTH_CLIENT_SECRET,
+        redirectUri: config.BITRIX_OAUTH_REDIRECT_URI,
+        code
+      });
+
+      const portalUrl = getPortalUrlFromOAuth(token, stateRow.portal_url);
+      const tempClient = new BitrixRestClient({
+        logger,
+        auth: { type: "oauth", portalUrl, accessToken: token.access_token }
+      });
+
+      let profile: any = null;
+      try {
+        const profileRes = await tempClient.call<any>("profile", {});
+        profile = profileRes.result ?? profileRes;
+      } catch (err) {
+        logger.warn({ err }, "bitrix_oauth_profile_failed");
+      }
+
+      const bitrixUserId = Number(profile?.ID ?? profile?.id ?? token.user_id);
+      const actorName =
+        [profile?.NAME ?? profile?.name, profile?.LAST_NAME ?? profile?.lastName].filter(Boolean).join(" ").trim() ||
+        stateRow.label ||
+        `Bitrix user ${Number.isFinite(bitrixUserId) ? bitrixUserId : "unknown"}`;
+      const connectionId = `oauth-${sanitizeIdPart(token.member_id ?? new URL(portalUrl).hostname)}-${Number.isFinite(bitrixUserId) ? bitrixUserId : randomUrlToken(6)}`;
+      const mcpToken = `b24mcp_${randomUrlToken(32)}`;
+      const mcpTokenId = `${connectionId}-gpt`;
+
+      await upsertConnection(pool, {
+        id: connectionId,
+        portal_url: portalUrl,
+        auth_type: "oauth",
+        webhook_url: null,
+        oauth_access_token_enc: encryptString(token.access_token, config.APP_ENCRYPTION_KEY_BASE64),
+        oauth_refresh_token_enc: token.refresh_token ? encryptString(token.refresh_token, config.APP_ENCRYPTION_KEY_BASE64) : null,
+        oauth_expires_at: getBitrixTokenExpiresAt(token)
+      });
+
+      await upsertMcpAccessToken({
+        pool,
+        id: mcpTokenId,
+        token: mcpToken,
+        label: stateRow.label ?? `${actorName} GPT connector`,
+        actorName,
+        bitrixConnectionId: connectionId,
+        bitrixUserId: Number.isFinite(bitrixUserId) ? bitrixUserId : null,
+        active: true
+      });
+
+      res.send(
+        htmlResponse(
+          "Bitrix OAuth connected",
+          `<h1>Bitrix авторизация готова</h1>
+<p>Подключение создано для: <strong>${escapeHtml(actorName)}</strong>.</p>
+<p>Скопируй этот MCP token в настройки GPT-коннектора. Сервер покажет его только один раз.</p>
+<pre>${escapeHtml(mcpToken)}</pre>
+<p>MCP URL: <code>/mcp</code></p>`
+        )
+      );
+    } catch (err) {
+      logger.error({ err }, "bitrix_oauth_callback_failed");
+      res.status(500).send(htmlResponse("OAuth error", `<h1>OAuth error</h1><p>${escapeHtml(err instanceof Error ? err.message : String(err))}</p>`));
+    }
+  });
+
   app.use(async (req, res, next) => {
     const rpcMethod = req.body?.method;
     const discovery = isDiscoveryRequest(req);
 
     if (req.path === "/healthz") {
+      return next();
+    }
+
+    if (isMcpRequestPath(req.path) && ["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+      logger.info(
+        {
+          method: req.method,
+          path: req.path,
+          rpcMethod,
+          authSkippedForDiscovery: true
+        },
+        "MCP auth bypass/discovery"
+      );
       return next();
     }
 
@@ -141,7 +334,7 @@ async function main() {
 
   app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 
-  app.all("/mcp", async (req, res) => {
+  app.all(/^\/(?:t\/[^/]+\/)?mcp$/, async (req, res) => {
     try {
       const { server } = createMcpServer({ config, logger, pool, requestAuth: (req as AuthedRequest).auth });
 
