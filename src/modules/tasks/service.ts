@@ -59,13 +59,21 @@ export class BitrixTasksService {
     let chatError: any;
 
     if (resolvedChatId && hasMethod(this.caps, "im.dialog.messages.get")) {
-      try {
-        const chatRes = await this.client.call<any>("im.dialog.messages.get", { dialog_id: String(resolvedChatId) });
-        return { source: "chat" as const, messages: normalizeChatMessages(taskId, chatRes.result ?? chatRes) };
-      } catch (err: any) {
-        chatError = err;
-        // Some Bitrix24 task cards expose comments counters and chatId,
-        // but deny direct IM dialog access. In that case continue to legacy task comments.
+      const rawChatId = String(resolvedChatId);
+      const dialogIds = rawChatId.startsWith("chat")
+        ? [rawChatId]
+        : [`chat${rawChatId}`, rawChatId];
+
+      for (const dialogId of dialogIds) {
+        try {
+          const chatRes = await this.client.call<any>("im.dialog.messages.get", { dialog_id: dialogId });
+          return { source: "chat" as const, dialogId, messages: normalizeChatMessages(taskId, chatRes.result ?? chatRes) };
+        } catch (err: any) {
+          chatError = err;
+          // Some Bitrix24 task cards expose comments counters and chatId,
+          // but deny direct IM dialog access. In that case continue to the next dialog id
+          // variant and then to legacy task comments.
+        }
       }
     }
 
