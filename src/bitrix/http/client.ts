@@ -56,6 +56,14 @@ export class BitrixRestClient {
     return `${base}rest/${method}.json`;
   }
 
+  private buildV3Url(method: string): string {
+    if (this.auth.type !== "oauth") {
+      throw new AppError("Bitrix REST v3 requires OAuth auth", "BITRIX_REST_V3_AUTH_REQUIRED");
+    }
+    const base = normalizeBaseUrl(this.auth.portalUrl);
+    return `${base}rest/api/${method}`;
+  }
+
   async call<T>(method: string, params: Record<string, unknown> = {}): Promise<BitrixRestResponse<T>> {
     const url = this.buildUrl(method);
 
@@ -111,6 +119,72 @@ export class BitrixRestClient {
           if (!retryable || attempt === this.retries) break;
           const backoff = 250 * Math.pow(2, attempt);
           this.logger.warn({ method, attempt, backoff }, "bitrix_call_retry");
+          await new Promise((r) => setTimeout(r, backoff));
+        }
+      }
+      throw lastErr;
+    });
+  }
+
+  async callV3<T>(method: string, params: Record<string, unknown> = {}): Promise<BitrixRestResponse<T>> {
+    const url = this.buildV3Url(method);
+
+    const doFetch = async (): Promise<BitrixRestResponse<T>> => {
+      if (this.auth.type !== "oauth") {
+        throw new AppError("Bitrix REST v3 requires OAuth auth", "BITRIX_REST_V3_AUTH_REQUIRED");
+      }
+
+      const body = JSON.stringify({
+        ...params,
+        auth: this.auth.accessToken
+      });
+
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        "accept": "application/json",
+        "authorization": `Bearer ${this.auth.accessToken}`
+      };
+
+      const res = await fetch(url, { method: "POST", body, headers });
+      const text = await res.text();
+      let json: unknown;
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        throw new AppError(`Bitrix REST v3 returned non-JSON for ${method}`, "BITRIX_REST_V3_BAD_RESPONSE", {
+          status: res.status,
+          details: { text: text.slice(0, 500) }
+        });
+      }
+
+      if (!res.ok) {
+        throw new AppError(`Bitrix REST v3 HTTP ${res.status} for ${method}`, "BITRIX_REST_V3_HTTP", {
+          status: res.status,
+          details: json
+        });
+      }
+
+      const br = json as BitrixRestResponse<T>;
+      if (br.error) {
+        throw new AppError(`Bitrix REST v3 error for ${method}: ${br.error}`, "BITRIX_REST_V3_ERROR", { details: br });
+      }
+      return br;
+    };
+
+    return this.limiter.schedule(async () => {
+      let lastErr: unknown;
+      for (let attempt = 0; attempt <= this.retries; attempt++) {
+        try {
+          return await doFetch();
+        } catch (e: any) {
+          lastErr = e;
+          const status = e?.status ?? e?.statusCode ?? e?.cause?.status;
+          const retryable =
+            status === 429 || (typeof status === "number" && status >= 500) || (e?.code && String(e.code).includes("ECONN"));
+
+          if (!retryable || attempt === this.retries) break;
+          const backoff = 250 * Math.pow(2, attempt);
+          this.logger.warn({ method, attempt, backoff }, "bitrix_v3_call_retry");
           await new Promise((r) => setTimeout(r, backoff));
         }
       }
