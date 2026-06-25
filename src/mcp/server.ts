@@ -10,6 +10,7 @@ import { createBitrixClientForConnection } from "../bitrix/factory.js";
 import { BitrixTasksService } from "../modules/tasks/service.js";
 import { BitrixDiskService } from "../modules/disk/service.js";
 import { BitrixKnowledgeService } from "../modules/knowledge/service.js";
+import { BitrixNoteService } from "../modules/note/service.js";
 import { BitrixBizprocService } from "../modules/bizproc/service.js";
 import { BitrixUsersService } from "../modules/users/service.js";
 import { ReportsService } from "../modules/reports/service.js";
@@ -1040,6 +1041,157 @@ export function toolList(): ToolDef[] {
         });
 
         return { connectionId, method, res: await client.call(method, input.params ?? {}) };
+      }
+    },
+    {
+      name: "bitrix_rest_v3_call_readonly",
+      description: "Diagnostic read-only Bitrix REST v3 call via /rest/api/. Blocks mutating methods like add/update/delete/set.",
+      risky: false,
+      inputSchema: z.object({
+        method: z.string().min(1),
+        params: z.record(z.any()).optional()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const method = String(input.method);
+        const lower = method.toLowerCase();
+
+        const forbiddenParts = [
+          ".add",
+          ".create",
+          ".update",
+          ".delete",
+          ".remove",
+          ".set",
+          ".bind",
+          ".unbind",
+          ".start",
+          ".complete",
+          ".send",
+          ".upload",
+          ".move",
+          ".copy"
+        ];
+
+        if (forbiddenParts.some((part) => lower.includes(part))) {
+          throw new AppError(`REST v3 method '${method}' is not allowed in read-only diagnostic tool`, "READONLY_METHOD_FORBIDDEN", { status: 403 });
+        }
+
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+
+        return { connectionId, method, res: await client.callV3(method, input.params ?? {}) };
+      }
+    },
+    {
+      name: "bitrix_note_collection_list",
+      description: "REST v3 Note: list knowledge base collections.",
+      risky: false,
+      inputSchema: z.object({
+        pagination: z.record(z.any()).optional()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const note = new BitrixNoteService(client);
+        return { connectionId, res: await note.collectionList(input.pagination) };
+      }
+    },
+    {
+      name: "bitrix_note_collection_get",
+      description: "REST v3 Note: get one knowledge base collection by ID.",
+      risky: false,
+      inputSchema: z.object({
+        id: z.number().int().positive(),
+        select: z.array(z.string()).optional()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const note = new BitrixNoteService(client);
+        return { connectionId, res: await note.collectionGet(input.id, input.select) };
+      }
+    },
+    {
+      name: "bitrix_note_document_tree",
+      description: "REST v3 Note: list document tree for a knowledge base collection.",
+      risky: false,
+      inputSchema: z.object({
+        collection_id: z.number().int().positive()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const note = new BitrixNoteService(client);
+        return { connectionId, res: await note.documentTreeList(input.collection_id) };
+      }
+    },
+    {
+      name: "bitrix_note_document_get",
+      description: "REST v3 Note: get a document by ID. Markdown is excluded by default; use include_markdown=true to request it with truncation protection.",
+      risky: false,
+      inputSchema: z.object({
+        id: z.number().int().positive(),
+        include_markdown: z.boolean().optional(),
+        markdown_limit: z.number().int().positive().max(100000).optional(),
+        select: z.array(z.string()).optional()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const note = new BitrixNoteService(client);
+        return {
+          connectionId,
+          res: await note.documentGetSafe(input.id, {
+            includeMarkdown: input.include_markdown,
+            markdownLimit: input.markdown_limit,
+            select: input.select
+          })
+        };
+      }
+    },
+    {
+      name: "bitrix_note_document_search",
+      description: "REST v3 Note: search knowledge base documents.",
+      risky: false,
+      inputSchema: z.object({
+        query: z.string().min(1),
+        pagination: z.record(z.any()).optional()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const note = new BitrixNoteService(client);
+        return { connectionId, res: await note.documentSearchList(input.query, input.pagination) };
       }
     },
     {
