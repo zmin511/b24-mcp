@@ -36,3 +36,4 @@ Dockerfile.localbuild
 Dockerfile.bak_*
 node_modules/
 dist/
+_local_backups/
