@@ -20,7 +20,7 @@ import { jsonResult } from "./types.js";
 import { requireConfirm, redactSecrets } from "./safety.js";
 import { writeAuditLog } from "../storage/audit.js";
 import { upsertConnection } from "../storage/connections.js";
-import { revokeMcpAccessToken, upsertMcpAccessToken } from "../storage/mcpAccessTokens.js";
+import { listMcpAccessTokens, revokeMcpAccessToken, upsertMcpAccessToken } from "../storage/mcpAccessTokens.js";
 import { encryptString } from "../common/crypto.js";
 import { syncRecentTasks } from "../jobs/syncRecentTasks.js";
 import { syncTaskById } from "../jobs/syncTaskById.js";
@@ -295,6 +295,31 @@ export function toolList(): ToolDef[] {
           bitrixConnectionId: input.bitrix_connection_id,
           active: input.active ?? true,
           note: "Token stored as SHA-256 hash; plaintext token is not returned by the server."
+        };
+      }
+    },
+    {
+      name: "bitrix_mcp_access_token_list",
+      description: "List MCP access tokens without secrets. Shows owner, connection, active status, and last usage. Requires admin token.",
+      risky: false,
+      inputSchema: z
+        .object({
+          active: z.boolean().optional(),
+          limit: z.number().int().positive().max(500).optional()
+        })
+        .merge(baseInput),
+      handler: async (ctx, input) => {
+        requireAdmin(ctx, "bitrix_mcp_access_token_list");
+
+        const items = await listMcpAccessTokens(ctx.pool, {
+          active: input.active,
+          limit: input.limit
+        });
+
+        return {
+          ok: true,
+          count: items.length,
+          items
         };
       }
     },
