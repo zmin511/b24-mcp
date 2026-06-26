@@ -66,3 +66,14 @@ export async function upsertMcpAccessToken(params: {
   );
 }
 
+
+export async function revokeMcpAccessToken(pool: DbPool, id: string): Promise<boolean> {
+  const res = await pool.query(
+    `update mcp_access_tokens
+     set active = false, updated_at = now()
+     where id = $1 and active = true`,
+    [id]
+  );
+
+  return (res.rowCount ?? 0) > 0;
+}

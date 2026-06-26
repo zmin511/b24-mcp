@@ -20,7 +20,7 @@ import { jsonResult } from "./types.js";
 import { requireConfirm, redactSecrets } from "./safety.js";
 import { writeAuditLog } from "../storage/audit.js";
 import { upsertConnection } from "../storage/connections.js";
-import { upsertMcpAccessToken } from "../storage/mcpAccessTokens.js";
+import { revokeMcpAccessToken, upsertMcpAccessToken } from "../storage/mcpAccessTokens.js";
 import { encryptString } from "../common/crypto.js";
 import { syncRecentTasks } from "../jobs/syncRecentTasks.js";
 import { syncTaskById } from "../jobs/syncTaskById.js";
@@ -295,6 +295,30 @@ export function toolList(): ToolDef[] {
           bitrixConnectionId: input.bitrix_connection_id,
           active: input.active ?? true,
           note: "Token stored as SHA-256 hash; plaintext token is not returned by the server."
+        };
+      }
+    },
+    {
+      name: "bitrix_mcp_access_token_revoke",
+      description: "Disable a per-user MCP access token by id. Requires admin token and confirm=true.",
+      risky: true,
+      inputSchema: z
+        .object({
+          id: z.string().min(1)
+        })
+        .merge(baseInput),
+      handler: async (ctx, input) => {
+        requireAdmin(ctx, "bitrix_mcp_access_token_revoke");
+        requireConfirm("bitrix_mcp_access_token_revoke", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
+
+        const revoked = await revokeMcpAccessToken(ctx.pool, input.id);
+
+        return {
+          ok: true,
+          id: input.id,
+          revoked,
+          active: revoked ? false : undefined,
+          note: revoked ? "Token disabled." : "Token was not found or was already inactive."
         };
       }
     },
