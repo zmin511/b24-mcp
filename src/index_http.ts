@@ -63,6 +63,10 @@ function isMcpRequestPath(pathname: string): boolean {
   return pathname === "/mcp" || /^\/t\/[^/]+\/mcp$/.test(pathname);
 }
 
+function redactMcpPath(pathname: string): string {
+  return pathname.replace(/^\/t\/[^/]+\/mcp$/, "/t/[REDACTED]/mcp");
+}
+
 function isDiscoveryRequest(req: express.Request): boolean {
   const rpcMethod = req.body?.method;
   return (
@@ -262,7 +266,7 @@ async function main() {
       logger.info(
         {
           method: req.method,
-          path: req.path,
+          path: redactMcpPath(req.path),
           rpcMethod,
           authSkippedForDiscovery: true
         },
@@ -275,7 +279,7 @@ async function main() {
       logger.info(
         {
           method: req.method,
-          path: req.path,
+          path: redactMcpPath(req.path),
           rpcMethod,
           authSkippedForDiscovery: true
         },
@@ -289,7 +293,7 @@ async function main() {
     logger.info(
       {
         method: req.method,
-        path: req.path,
+        path: redactMcpPath(req.path),
         rpcMethod,
         tokenSource,
         providedTokenLength: providedToken?.length ?? 0,
