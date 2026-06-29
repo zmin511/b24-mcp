@@ -63,6 +63,10 @@ function isMcpRequestPath(pathname: string): boolean {
   return pathname === "/mcp" || /^\/t\/[^/]+\/mcp$/.test(pathname);
 }
 
+function redactMcpPath(pathname: string): string {
+  return pathname.replace(/^\/t\/[^/]+\/mcp$/, "/t/[REDACTED]/mcp");
+}
+
 function isDiscoveryRequest(req: express.Request): boolean {
   const rpcMethod = req.body?.method;
   return (
@@ -118,6 +122,15 @@ function escapeHtml(value: string) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+
+function getPublicBaseUrlFromRedirectUri(redirectUri: string): string {
+  const url = new URL(redirectUri);
+  url.pathname = url.pathname.replace(/\/oauth\/bitrix\/callback$/, "/");
+  url.search = "";
+  url.hash = "";
+  return url.toString();
 }
 
 async function main() {
@@ -239,9 +252,24 @@ async function main() {
           "Bitrix OAuth connected",
           `<h1>Bitrix авторизация готова</h1>
 <p>Подключение создано для: <strong>${escapeHtml(actorName)}</strong>.</p>
-<p>Скопируй этот MCP token в настройки GPT-коннектора. Сервер покажет его только один раз.</p>
+
+<h2>Рекомендуемый личный режим</h2>
+<p>Используй общий MCP URL и свой персональный ключ. Так один опубликованный коннектор может быть общим, а каждый сотрудник работает от своей Bitrix-авторизации.</p>
+<p><strong>MCP URL:</strong></p>
+<pre>${escapeHtml(new URL("mcp", getPublicBaseUrlFromRedirectUri(config.BITRIX_OAUTH_REDIRECT_URI)).toString())}</pre>
+<p><strong>Authorization Bearer token:</strong></p>
 <pre>${escapeHtml(mcpToken)}</pre>
-<p>MCP URL: <code>/mcp</code></p>`
+
+<h2>Важно</h2>
+<ul>
+  <li>Этот token персональный. Не публикуй его в задачах, комментариях, описаниях коннекторов и общих инструкциях.</li>
+  <li>Кто знает этот token, тот может использовать Bitrix MCP от имени: <strong>${escapeHtml(actorName)}</strong>.</li>
+  <li>Сервер показывает token только один раз. Сохрани его в настройках личного коннектора.</li>
+</ul>
+
+<h2>Legacy/service режим</h2>
+<p>Старый формат URL с token в пути оставлен только для совместимости и сервисных коннекторов вроде service connector:</p>
+<pre>${escapeHtml(new URL(`t/${mcpToken}/mcp`, getPublicBaseUrlFromRedirectUri(config.BITRIX_OAUTH_REDIRECT_URI)).toString())}</pre>`
         )
       );
     } catch (err) {
@@ -262,7 +290,7 @@ async function main() {
       logger.info(
         {
           method: req.method,
-          path: req.path,
+          path: redactMcpPath(req.path),
           rpcMethod,
           authSkippedForDiscovery: true
         },
@@ -275,7 +303,7 @@ async function main() {
       logger.info(
         {
           method: req.method,
-          path: req.path,
+          path: redactMcpPath(req.path),
           rpcMethod,
           authSkippedForDiscovery: true
         },
@@ -289,7 +317,7 @@ async function main() {
     logger.info(
       {
         method: req.method,
-        path: req.path,
+        path: redactMcpPath(req.path),
         rpcMethod,
         tokenSource,
         providedTokenLength: providedToken?.length ?? 0,

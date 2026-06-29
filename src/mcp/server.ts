@@ -20,7 +20,7 @@ import { jsonResult } from "./types.js";
 import { requireConfirm, redactSecrets } from "./safety.js";
 import { writeAuditLog } from "../storage/audit.js";
 import { upsertConnection } from "../storage/connections.js";
-import { upsertMcpAccessToken } from "../storage/mcpAccessTokens.js";
+import { listMcpAccessTokens, revokeMcpAccessToken, upsertMcpAccessToken } from "../storage/mcpAccessTokens.js";
 import { encryptString } from "../common/crypto.js";
 import { syncRecentTasks } from "../jobs/syncRecentTasks.js";
 import { syncTaskById } from "../jobs/syncTaskById.js";
@@ -44,6 +44,152 @@ const baseInput = z.object({
   connection_id: z.string().optional(),
   confirm: z.boolean().optional()
 });
+
+const executionPlanActionSchema = z.discriminatedUnion("type", [
+  z.object({
+    id: z.string().min(1),
+    type: z.literal("task_comment_add"),
+    task_id: z.number().int().positive(),
+    message: z.string().min(1).max(10000)
+  }),
+  z.object({
+    id: z.string().min(1),
+    type: z.literal("task_checklist_add"),
+    task_id: z.number().int().positive(),
+    title: z.string().min(1).max(1000)
+  }),
+  z.object({
+    id: z.string().min(1),
+    type: z.literal("task_create"),
+    local_ref: z.string().min(1).max(100).optional(),
+    fields: z.record(z.union([
+      z.string(),
+      z.number(),
+      z.boolean(),
+      z.array(z.union([z.string(), z.number(), z.boolean()])),
+      z.null()
+    ]))
+  }),
+  z.object({
+    id: z.string().min(1),
+    type: z.literal("task_update_fields"),
+    task_id: z.number().int().positive(),
+    fields: z.record(z.union([
+      z.string(),
+      z.number(),
+      z.boolean(),
+      z.array(z.union([z.string(), z.number(), z.boolean()])),
+      z.null()
+    ]))
+  }),
+  z.object({
+    id: z.string().min(1),
+    type: z.literal("task_update_description_append"),
+    task_id: z.number().int().positive(),
+    text: z.string().min(1).max(20000)
+  }),
+  z.object({
+    id: z.string().min(1),
+    type: z.literal("task_participants_update"),
+    task_id: z.number().int().positive(),
+    accomplices: z.array(z.number().int().positive()).max(50).optional(),
+    auditors: z.array(z.number().int().positive()).max(50).optional()
+  }),
+  z.object({
+    id: z.string().min(1),
+    type: z.literal("im_message_add"),
+    dialog_id: z.string().min(1).max(100),
+    message: z.string().min(1).max(10000)
+  }),
+  z.object({
+    id: z.string().min(1),
+    type: z.literal("disk_file_create_text"),
+    folder_id: z.number().int().positive(),
+    filename: z.string().min(1).max(255),
+    content: z.string().min(1).max(200000)
+  })
+]);
+
+const executionPlanSchema = z.object({
+  plan_id: z.string().min(1).max(200),
+  dry_run: z.boolean().optional(),
+  stop_on_error: z.boolean().optional(),
+  actions: z.array(executionPlanActionSchema).min(1).max(100)
+});
+
+const taskBatchQuerySchema = z.object({
+  name: z.string().min(1).max(100),
+  params: z.object({
+    order: z.record(z.enum(["asc", "desc", "ASC", "DESC"])).optional(),
+    filter: z.record(z.union([
+      z.string(),
+      z.number(),
+      z.boolean(),
+      z.array(z.union([z.string(), z.number(), z.boolean()]))
+    ])).optional(),
+    select: z.array(z.string().min(1).max(100)).max(100).optional(),
+    start: z.number().int().min(0).optional()
+  }).optional()
+});
+
+function normalizeBulkTask(task: any) {
+  if (!task) return null;
+
+  return {
+    taskId: Number(task.id ?? task.ID),
+    title: task.title ?? task.TITLE ?? "",
+    status: task.status ?? task.STATUS,
+    responsibleId: Number(task.responsibleId ?? task.RESPONSIBLE_ID ?? 0) || null,
+    createdBy: Number(task.createdBy ?? task.CREATED_BY ?? 0) || null,
+    createdDate: task.createdDate ?? task.CREATED_DATE ?? null,
+    changedDate: task.changedDate ?? task.CHANGED_DATE ?? null,
+    deadline: task.deadline ?? task.DEADLINE ?? null,
+    closedDate: task.closedDate ?? task.CLOSED_DATE ?? null,
+    priority: task.priority ?? task.PRIORITY ?? null,
+    groupId: Number(task.groupId ?? task.GROUP_ID ?? 0) || null,
+    chatId: task.chatId ? String(task.chatId) : (task.CHAT_ID ? String(task.CHAT_ID) : null)
+  };
+}
+
+function extractTaskListItems(res: any) {
+  const raw = res?.result?.tasks ?? res?.result?.items ?? res?.result ?? [];
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === "object") return Object.values(raw);
+  return [];
+}
+
+function normalizeBulkChecklist(res: any) {
+  const raw = res?.result ?? res ?? [];
+  const items = Array.isArray(raw) ? raw : Object.values(raw ?? {});
+  return items.slice(0, 50).map((item: any) => ({
+    id: Number(item.id ?? item.ID),
+    title: item.title ?? item.TITLE ?? "",
+    isComplete: item.isComplete ?? item.IS_COMPLETE ?? item.complete ?? null,
+    sortIndex: item.sortIndex ?? item.SORT_INDEX ?? null
+  }));
+}
+
+function normalizeBulkResults(res: any) {
+  const raw = res?.result ?? res ?? [];
+  const items = Array.isArray(raw) ? raw : Object.values(raw ?? {});
+  return items.slice(0, 20).map((item: any) => ({
+    id: Number(item.id ?? item.ID),
+    text: String(item.text ?? item.TEXT ?? item.commentText ?? "").slice(0, 1000),
+    createdBy: Number(item.createdBy ?? item.CREATED_BY ?? 0) || null,
+    createdAt: item.createdAt ?? item.CREATED_AT ?? item.createdDate ?? null
+  }));
+}
+
+function normalizeBulkComments(res: any) {
+  const raw = res?.result ?? res ?? [];
+  const items = Array.isArray(raw) ? raw : Object.values(raw ?? {});
+  return items.slice(0, 20).map((item: any) => ({
+    id: Number(item.id ?? item.ID),
+    authorId: Number(item.authorId ?? item.AUTHOR_ID ?? item.POST_AUTHOR_ID ?? 0) || null,
+    date: item.date ?? item.POST_DATE ?? item.createdAt ?? null,
+    message: String(item.message ?? item.POST_MESSAGE ?? item.text ?? "").slice(0, 1000)
+  }));
+}
 
 function resolveConnectionId(ctx: Ctx, input: any): string {
   if (ctx.requestAuth?.kind === "user") return ctx.requestAuth.connectionId;
@@ -149,6 +295,55 @@ export function toolList(): ToolDef[] {
           bitrixConnectionId: input.bitrix_connection_id,
           active: input.active ?? true,
           note: "Token stored as SHA-256 hash; plaintext token is not returned by the server."
+        };
+      }
+    },
+    {
+      name: "bitrix_mcp_access_token_list",
+      description: "List MCP access tokens without secrets. Shows owner, connection, active status, and last usage. Requires admin token.",
+      risky: false,
+      inputSchema: z
+        .object({
+          active: z.boolean().optional(),
+          limit: z.number().int().positive().max(500).optional()
+        })
+        .merge(baseInput),
+      handler: async (ctx, input) => {
+        requireAdmin(ctx, "bitrix_mcp_access_token_list");
+
+        const items = await listMcpAccessTokens(ctx.pool, {
+          active: input.active,
+          limit: input.limit
+        });
+
+        return {
+          ok: true,
+          count: items.length,
+          items
+        };
+      }
+    },
+    {
+      name: "bitrix_mcp_access_token_revoke",
+      description: "Disable a per-user MCP access token by id. Requires admin token and confirm=true.",
+      risky: true,
+      inputSchema: z
+        .object({
+          id: z.string().min(1)
+        })
+        .merge(baseInput),
+      handler: async (ctx, input) => {
+        requireAdmin(ctx, "bitrix_mcp_access_token_revoke");
+        requireConfirm("bitrix_mcp_access_token_revoke", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
+
+        const revoked = await revokeMcpAccessToken(ctx.pool, input.id);
+
+        return {
+          ok: true,
+          id: input.id,
+          revoked,
+          active: revoked ? false : undefined,
+          note: revoked ? "Token disabled." : "Token was not found or was already inactive."
         };
       }
     },
@@ -1085,6 +1280,131 @@ export function toolList(): ToolDef[] {
         });
 
         return { connectionId, method, res: await client.callV3(method, input.params ?? {}) };
+      }
+    },
+    {
+      name: "bitrix_task_context_bulk_get",
+      description: "Bulk read compact basic task info for several task IDs. For comments, checklist, and results use separate task tools.",
+      risky: false,
+      inputSchema: z.object({
+        task_ids: z.array(z.number().int().positive()).min(1).max(20),
+        include_comments: z.boolean().optional(),
+        include_checklist: z.boolean().optional(),
+        include_results: z.boolean().optional()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+
+        const items = [];
+
+        for (const taskId of input.task_ids) {
+          const item: any = {
+            taskId,
+            task: null
+          };
+
+          try {
+            const taskRes = await client.call("tasks.task.get", { taskId });
+            const rawTask = (taskRes as any)?.task ?? (taskRes as any)?.result?.task ?? (taskRes as any)?.result ?? taskRes;
+            item.task = normalizeBulkTask(rawTask);
+            item.ok = true;
+          } catch (err: any) {
+            item.ok = false;
+            item.error = {
+              message: err?.message ?? String(err),
+              code: err?.code,
+              status: err?.status
+            };
+          }
+
+          if (input.include_comments || input.include_checklist || input.include_results) {
+            item.note = "Extra blocks are intentionally skipped in bulk context. Use bitrix_task_comments_get, bitrix_task_checklist_get, or bitrix_task_results_get separately.";
+          }
+
+          items.push(item);
+        }
+
+        return {
+          connectionId,
+          count: items.length,
+          items
+        };
+      }
+    },
+    {
+      name: "bitrix_task_search_batch",
+      description: "Find several Bitrix tasks by IDs and return compact normalized task rows.",
+      risky: false,
+      inputSchema: z.object({
+        task_ids: z.array(z.number().int().positive()).min(1).max(20)
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+
+        const results = [];
+
+        for (const taskId of input.task_ids) {
+          const params = {
+            filter: { ID: taskId },
+            select: [
+              "ID",
+              "TITLE",
+              "STATUS",
+              "RESPONSIBLE_ID",
+              "CREATED_BY",
+              "CREATED_DATE",
+              "CHANGED_DATE",
+              "DEADLINE",
+              "CLOSED_DATE",
+              "PRIORITY",
+              "GROUP_ID"
+            ],
+            start: 0
+          };
+
+          try {
+            const res = await client.call("tasks.task.list", params);
+            const tasks = extractTaskListItems(res).slice(0, 1).map(normalizeBulkTask);
+
+            results.push({
+              taskId,
+              ok: true,
+              found: tasks.length > 0,
+              task: tasks[0] ?? null,
+              total: (res as any)?.total ?? null
+            });
+          } catch (err: any) {
+            results.push({
+              taskId,
+              ok: false,
+              error: {
+                message: err?.message ?? String(err),
+                code: err?.code,
+                status: err?.status,
+                details: err?.details,
+                stackPreview: typeof err?.stack === "string" ? err.stack.slice(0, 1000) : undefined
+              }
+            });
+          }
+        }
+
+        return {
+          connectionId,
+          count: results.length,
+          results
+        };
       }
     },
     {

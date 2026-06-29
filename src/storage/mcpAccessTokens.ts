@@ -66,3 +66,60 @@ export async function upsertMcpAccessToken(params: {
   );
 }
 
+
+export async function revokeMcpAccessToken(pool: DbPool, id: string): Promise<boolean> {
+  const res = await pool.query(
+    `update mcp_access_tokens
+     set active = false, updated_at = now()
+     where id = $1 and active = true`,
+    [id]
+  );
+
+  return (res.rowCount ?? 0) > 0;
+}
+
+export async function listMcpAccessTokens(pool: DbPool, params?: {
+  active?: boolean;
+  limit?: number;
+}): Promise<Array<{
+  id: string;
+  label: string;
+  actor_name: string | null;
+  bitrix_connection_id: string;
+  bitrix_user_id: number | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  last_used_at: string | null;
+}>> {
+  const values: any[] = [];
+  const where: string[] = [];
+
+  if (typeof params?.active === "boolean") {
+    values.push(params.active);
+    where.push(`active = $${values.length}`);
+  }
+
+  const limit = Math.min(Math.max(params?.limit ?? 100, 1), 500);
+  values.push(limit);
+
+  const res = await pool.query(
+    `select
+       id,
+       label,
+       actor_name,
+       bitrix_connection_id,
+       bitrix_user_id,
+       active,
+       created_at,
+       updated_at,
+       last_used_at
+     from mcp_access_tokens
+     ${where.length ? `where ${where.join(" and ")}` : ""}
+     order by last_used_at desc nulls last, updated_at desc
+     limit $${values.length}`,
+    values
+  );
+
+  return res.rows;
+}
