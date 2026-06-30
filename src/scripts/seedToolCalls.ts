@@ -6,7 +6,7 @@ const examples = [
       id: "default",
       portal_url: "https://YOUR_PORTAL.bitrix24.ru",
       auth_type: "webhook",
-      webhook_url: "https://YOUR_PORTAL.bitrix24.ru/rest/1/WEBHOOK_CODE/"
+      webhook_url: "https://<BITRIX_DOMAIN>/rest/<USER_ID>/<WEBHOOK_CODE>/"
     }
   },
   { tool: "bitrix_health_check", args: { connection_id: "default" } },

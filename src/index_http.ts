@@ -268,7 +268,7 @@ async function main() {
 </ul>
 
 <h2>Legacy/service режим</h2>
-<p>Старый формат URL с token в пути оставлен только для совместимости и сервисных коннекторов вроде service connector:</p>
+<p>Старый формат URL с token в пути оставлен только для совместимости и сервисных коннекторов вроде service user:</p>
 <pre>${escapeHtml(new URL(`t/${mcpToken}/mcp`, getPublicBaseUrlFromRedirectUri(config.BITRIX_OAUTH_REDIRECT_URI)).toString())}</pre>`
         )
       );

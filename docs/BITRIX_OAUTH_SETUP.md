@@ -55,6 +55,6 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 - The MCP server never receives the user's Bitrix password.
 - Bitrix login, 2FA, SSO, and password rules stay fully inside Bitrix24.
-- Incoming webhooks still work for service users such as `service connector`.
+- Incoming webhooks still work for service users such as `service user`.
 - User MCP tokens cannot override `connection_id`; the server always uses the Bitrix connection linked to that token.
 

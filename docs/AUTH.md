@@ -9,17 +9,17 @@ The server has two independent authorization layers:
 
 ### Robot connection
 
-Create one Bitrix24 incoming webhook for the robot user, for example `service connector`, and register it as:
+Create one Bitrix24 incoming webhook for the robot user, for example `service user`, and register it as:
 
 ```json
 {
   "tool": "bitrix_connection_upsert",
   "args": {
     "confirm": true,
-    "id": "service-connector",
+    "id": "service-user",
     "portal_url": "https://your-portal.bitrix24.ru",
     "auth_type": "webhook",
-    "webhook_url": "https://your-portal.bitrix24.ru/rest/123/robot-webhook/"
+    "webhook_url": "https://<BITRIX_DOMAIN>/rest/<USER_ID>/<WEBHOOK_CODE>/"
   }
 }
 ```
@@ -38,7 +38,7 @@ For each employee, create a Bitrix24 incoming webhook or OAuth connection under 
     "id": "user-ivan",
     "portal_url": "https://your-portal.bitrix24.ru",
     "auth_type": "webhook",
-    "webhook_url": "https://your-portal.bitrix24.ru/rest/456/user-webhook/"
+    "webhook_url": "https://<BITRIX_DOMAIN>/rest/<USER_ID>/<WEBHOOK_CODE>/"
   }
 }
 ```
