@@ -47,7 +47,7 @@ Bitrix24 MCP OAuth Server — это MCP-сервер для подключен�
 
 Токены из legacy URL маскируются в логах:
 
-- было: `/t/<MCP_ACCESS_TOKEN>/mcp`
+- было: `/t/<token>/mcp`
 - стало: `/t/[REDACTED]/mcp`
 
 ---
@@ -218,7 +218,7 @@ This mode is intended for service connectors:
 
 Legacy URL tokens are redacted in logs:
 
-- before: `/t/<MCP_ACCESS_TOKEN>/mcp`
+- before: `/t/<token>/mcp`
 - after: `/t/[REDACTED]/mcp`
 
 ---
