@@ -161,5 +161,42 @@ export class BitrixKnowledgeService {
   kbPageAddBlock(params: { pageId: number; code: string; content: string }) {
     return this.client.call("landing.landing.addblock", { lid: params.pageId, fields: { CODE: params.code, CONTENT: params.content } });
   }
+
+  async kbPageCreateWithHtml(params: {
+    siteId: number;
+    title: string;
+    code?: string;
+    html: string;
+    blockCode?: string;
+  }) {
+    const pageRes = await this.kbPageCreate({
+      siteId: params.siteId,
+      title: params.title,
+      code: params.code
+    });
+
+    const pageId = pageRes?.result;
+
+    if (!pageId || typeof pageId !== "number") {
+      return {
+        page: pageRes,
+        block: null,
+        error: "Cannot extract created page id from landing.landing.add response"
+      };
+    }
+
+    const blockRes = await this.kbPageAddBlock({
+      pageId,
+      code: params.blockCode ?? "01.big_with_text_3",
+      content: params.html
+    });
+
+    return {
+      pageId,
+      blockId: blockRes?.result,
+      page: pageRes,
+      block: blockRes
+    };
+  }
 }
 

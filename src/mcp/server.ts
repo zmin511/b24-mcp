@@ -1689,6 +1689,39 @@ export function toolList(): ToolDef[] {
       }
     },
     {
+      name: "bitrix_kb_page_create_with_html",
+      description: "Create a knowledge base page and add one HTML block. Requires confirm=true.",
+      risky: true,
+      inputSchema: z.object({
+        site_id: z.number().int().positive(),
+        title: z.string().min(1),
+        code: z.string().min(1).optional(),
+        html: z.string().min(1),
+        block_code: z.string().min(1).optional()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        requireConfirm("bitrix_kb_page_create_with_html", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const kb = new BitrixKnowledgeService(client);
+        return {
+          connectionId,
+          res: await kb.kbPageCreateWithHtml({
+            siteId: input.site_id,
+            title: input.title,
+            code: input.code,
+            html: input.html,
+            blockCode: input.block_code
+          })
+        };
+      }
+    },
+    {
       name: "bitrix_bizproc_template_list",
       description: "List bizproc templates.",
       risky: false,
