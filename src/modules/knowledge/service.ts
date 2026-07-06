@@ -155,11 +155,11 @@ export class BitrixKnowledgeService {
   }
 
   kbPageUpdate(params: { pageId: number; title?: string; code?: string }) {
-    return this.client.call("landing.landing.update", { id: params.pageId, fields: { TITLE: params.title, CODE: params.code } });
+    return this.client.call("landing.landing.update", { lid: params.pageId, fields: { TITLE: params.title, CODE: params.code } });
   }
 
-  kbPageAddBlock(params: { pageId: number; code: string; content: Record<string, unknown> }) {
-    return this.client.call("landing.block.add", { lid: params.pageId, fields: { CODE: params.code, CONTENT: params.content } });
+  kbPageAddBlock(params: { pageId: number; code: string; content: string }) {
+    return this.client.call("landing.landing.addblock", { lid: params.pageId, fields: { CODE: params.code, CONTENT: params.content } });
   }
 }
 

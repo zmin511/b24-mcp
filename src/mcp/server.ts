@@ -1674,7 +1674,7 @@ export function toolList(): ToolDef[] {
       name: "bitrix_kb_page_add_block",
       description: "Add landing block to knowledge page. Requires confirm=true.",
       risky: true,
-      inputSchema: z.object({ page_id: z.number().int().positive(), code: z.string().min(1), content: z.record(z.any()) }).merge(baseInput),
+      inputSchema: z.object({ page_id: z.number().int().positive(), code: z.string().min(1), content: z.string().min(1) }).merge(baseInput),
       handler: async (ctx, input) => {
         requireConfirm("bitrix_kb_page_add_block", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
         const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
