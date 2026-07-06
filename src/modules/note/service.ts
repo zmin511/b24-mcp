@@ -67,4 +67,30 @@ export class BitrixNoteService {
       ...(pagination ? { pagination } : {})
     });
   }
+
+  documentCreate(params: {
+    collectionId: number;
+    parentId?: number;
+    title: string;
+    markdown: string;
+    position?: number;
+  }) {
+    return this.client.callV3("note.document.add", { fields: params });
+  }
+
+  documentUpdate(params: {
+    id: number;
+    title?: string;
+    markdown?: string;
+    parentId?: number | null;
+    position?: number;
+  }) {
+    const { id, ...fields } = params;
+    return this.client.callV3("note.document.update", { id, fields });
+  }
+
+  documentDelete(id: number) {
+    return this.client.callV3("note.document.delete", { id });
+  }
+
 }
