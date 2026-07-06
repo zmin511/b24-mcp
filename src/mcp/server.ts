@@ -1297,7 +1297,6 @@ export function toolList(): ToolDef[] {
           "note.document.save",
           "note.document.delete",
           "note.document.remove",
-          "note.document.move",
           "note.document.copy",
           "note.document.tree.add",
           "note.document.tree.create",
@@ -1688,6 +1687,8 @@ export function toolList(): ToolDef[] {
       risky: true,
       inputSchema: z.object({
         id: z.number().int().positive(),
+        title: z.string().min(1).max(255).optional(),
+        markdown: z.string().min(1).max(200000).optional(),
         parent_id: z.number().int().positive().nullable().optional(),
         position: z.number().int().optional(),
         dry_run: z.boolean().optional(),
