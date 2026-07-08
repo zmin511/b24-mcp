@@ -1,5 +1,71 @@
 # Bitrix24 MCP OAuth Server
 
+Version: **0.2.0**
+
+---
+
+## RU: Релиз v0.2.0 — Bitrix Note 2.0 read/write
+
+В релизе `v0.2.0` зафиксирована стабильная поддержка Bitrix Note 2.0 через REST v3.
+
+Рабочие read tools:
+
+- `bitrix_note_collection_list` — список коллекций Note 2.0.
+- `bitrix_note_collection_get` — информация о конкретной коллекции.
+- `bitrix_note_document_tree` — дерево документов коллекции.
+- `bitrix_note_document_get` — чтение конкретного документа.
+- `bitrix_note_document_search` — поиск документов.
+
+Рабочие write tools:
+
+- `bitrix_note_document_create` — создание документа через `note.document.add`.
+- `bitrix_note_document_update` — обновление документа через `note.document.update`.
+- `bitrix_note_document_delete` — удаление документа через `note.document.delete`.
+
+Диагностика:
+
+- `bitrix_rest_v3_note_method_probe` — безопасная проверка доступности Note REST v3 методов.
+
+Защита write-операций:
+
+- по умолчанию используется `dry_run=true`;
+- для реальной записи требуется `confirm=true`;
+- для удаления дополнительно требуется `confirm_delete_text=DELETE`.
+
+В релиз не входят старая `/kb/`, Landing API write tools и база `/knowledge/baza_znaniy_medsesstry/`.
+
+---
+
+## EN: Release v0.2.0 — Bitrix Note 2.0 read/write
+
+Release `v0.2.0` provides stable Bitrix Note 2.0 support through REST v3.
+
+Working read tools:
+
+- `bitrix_note_collection_list` — list Note 2.0 collections.
+- `bitrix_note_collection_get` — get a specific collection.
+- `bitrix_note_document_tree` — get collection document tree.
+- `bitrix_note_document_get` — read a specific document.
+- `bitrix_note_document_search` — search documents.
+
+Working write tools:
+
+- `bitrix_note_document_create` — create a document through `note.document.add`.
+- `bitrix_note_document_update` — update a document through `note.document.update`.
+- `bitrix_note_document_delete` — delete a document through `note.document.delete`.
+
+Diagnostics:
+
+- `bitrix_rest_v3_note_method_probe` — safely probe Note REST v3 method availability.
+
+Write operation protection:
+
+- `dry_run=true` by default;
+- real writes require `confirm=true`;
+- delete additionally requires `confirm_delete_text=DELETE`.
+
+Old `/kb/`, Landing API write tools and `/knowledge/baza_znaniy_medsesstry/` are not included in this release.
+
 ## RU: Назначение
 
 Bitrix24 MCP OAuth Server — это MCP-сервер для подключения ChatGPT/агентов к Bitrix24 через REST API.

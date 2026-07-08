@@ -1,6 +1,6 @@
 {
   "name": "b24-bp-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Production-ready (MVP) MCP server for Bitrix24 with polling sync and local reporting DB.",
