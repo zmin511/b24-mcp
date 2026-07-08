@@ -1283,6 +1283,125 @@ export function toolList(): ToolDef[] {
       }
     },
     {
+      name: "bitrix_rest_v3_note_method_probe",
+      description: "Safely probe selected REST v3 Note methods with an empty diagnostic payload. Does not allow arbitrary REST calls and is intended to discover whether Note write methods exist on this Bitrix portal.",
+      risky: false,
+      inputSchema: z.object({
+        methods: z.array(z.string().min(1)).max(50).optional(),
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const allowedMethods = [
+          "note.document.create",
+          "note.document.add",
+          "note.document.update",
+          "note.document.save",
+          "note.document.delete",
+          "note.document.remove",
+          "note.document.copy",
+          "note.document.tree.add",
+          "note.document.tree.create",
+          "note.document.tree.update",
+          "note.document.tree.delete",
+          "note.document.content.set",
+          "note.document.markdown.set",
+          "note.document.markdown.update",
+          "note.document.item.add",
+          "note.document.item.create",
+          "note.document.item.update",
+          "note.document.item.delete"
+        ];
+
+        const inputMethods = Array.isArray((input as any).methods) ? (input as any).methods : undefined;
+        const requested: string[] = inputMethods?.length ? inputMethods.map((m: unknown) => String(m)) : allowedMethods;
+        const methods: string[] = [...new Set(requested.map((m) => String(m).trim()).filter(Boolean))];
+
+        for (const method of methods) {
+          if (!allowedMethods.includes(method)) {
+            throw new AppError(
+              `Method '${method}' is not allowed in Note probe`,
+              "NOTE_PROBE_METHOD_FORBIDDEN",
+              { status: 403, details: { allowedMethods } }
+            );
+          }
+        }
+
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+
+        const results = [];
+
+        for (const method of methods) {
+          try {
+            const res = await client.callV3(method, {});
+            results.push({
+              method,
+              status: "ok",
+              exists: true,
+              note: "Method returned success with empty diagnostic payload.",
+              res
+            });
+          } catch (err: any) {
+            const details = err?.details ?? err?.cause?.details ?? {};
+            const errorObj = details?.error ?? details?.result?.error ?? details;
+            const code = String(errorObj?.code ?? err?.code ?? "");
+            const message = String(errorObj?.message ?? err?.message ?? "");
+
+            let status = "unknown_error";
+            let exists: boolean | null = null;
+
+            const combined = `${code} ${message}`.toLowerCase();
+
+            if (
+              combined.includes("methodnotfound") ||
+              combined.includes("method not found") ||
+              combined.includes("метод") && combined.includes("не найден")
+            ) {
+              status = "method_not_found";
+              exists = false;
+            } else if (
+              combined.includes("access_denied") ||
+              combined.includes("forbidden") ||
+              combined.includes("permission") ||
+              combined.includes("доступ")
+            ) {
+              status = "forbidden_or_no_scope";
+              exists = true;
+            } else if (
+              combined.includes("parameter") ||
+              combined.includes("param") ||
+              combined.includes("validation") ||
+              combined.includes("required") ||
+              combined.includes("не задан") ||
+              combined.includes("обяз")
+            ) {
+              status = "validation_error_maybe_exists";
+              exists = true;
+            }
+
+            results.push({
+              method,
+              status,
+              exists,
+              errorCode: code || undefined,
+              errorMessage: message || undefined
+            });
+          }
+        }
+
+        return {
+          connectionId,
+          checked: results.length,
+          results,
+          note: "Probe uses an empty diagnostic payload. A validation error usually means the method may exist, while method_not_found means it is unavailable on this portal/API."
+        };
+      }
+    },
+    {
       name: "bitrix_task_context_bulk_get",
       description: "Bulk read compact basic task info for several task IDs. For comments, checklist, and results use separate task tools.",
       risky: false,
@@ -1512,6 +1631,145 @@ export function toolList(): ToolDef[] {
         });
         const note = new BitrixNoteService(client);
         return { connectionId, res: await note.documentSearchList(input.query, input.pagination) };
+      }
+    },
+    {
+      name: "bitrix_note_document_create",
+      description: "REST v3 Note: create a knowledge base document via note.document.add. Write operation: dry_run=true by default; requires confirm=true to execute.",
+      risky: true,
+      inputSchema: z.object({
+        collection_id: z.number().int().positive(),
+        parent_id: z.number().int().positive().optional(),
+        title: z.string().min(1).max(255),
+        markdown: z.string().min(1).max(200000),
+        position: z.number().int().optional(),
+        dry_run: z.boolean().optional(),
+        confirm: z.boolean().optional()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const dryRun = input.dry_run !== false;
+        if (!dryRun) {
+          requireConfirm("bitrix_note_document_create", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
+        }
+
+        const payload = {
+          collectionId: input.collection_id,
+          ...(input.parent_id ? { parentId: input.parent_id } : {}),
+          title: input.title,
+          markdown: input.markdown,
+          ...(input.position !== undefined ? { position: input.position } : {})
+        };
+
+        if (dryRun) {
+          return {
+            ok: true,
+            dryRun: true,
+            method: "note.document.add",
+            payload,
+            note: "No request was sent to Bitrix. Set dry_run=false and confirm=true to create the document via note.document.add."
+          };
+        }
+
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const note = new BitrixNoteService(client);
+        return { connectionId, dryRun: false, res: await note.documentCreate(payload) };
+      }
+    },
+    {
+      name: "bitrix_note_document_update",
+      description: "REST v3 Note: update a knowledge base document via note.document.update. Write operation: dry_run=true by default; requires confirm=true to execute.",
+      risky: true,
+      inputSchema: z.object({
+        id: z.number().int().positive(),
+        title: z.string().min(1).max(255).optional(),
+        markdown: z.string().min(1).max(200000).optional(),
+        parent_id: z.number().int().positive().nullable().optional(),
+        position: z.number().int().optional(),
+        dry_run: z.boolean().optional(),
+        confirm: z.boolean().optional()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const dryRun = input.dry_run !== false;
+        if (!input.title && input.markdown === undefined && input.parent_id === undefined && input.position === undefined) {
+          throw new Error("Nothing to update: provide title, markdown, parent_id, or position.");
+        }
+        if (!dryRun) {
+          requireConfirm("bitrix_note_document_update", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
+        }
+
+        const payload = {
+          id: input.id,
+          ...(input.title ? { title: input.title } : {}),
+          ...(input.markdown !== undefined ? { markdown: input.markdown } : {}),
+          ...(input.parent_id !== undefined ? { parentId: input.parent_id } : {}),
+          ...(input.position !== undefined ? { position: input.position } : {})
+        };
+
+        if (dryRun) {
+          return {
+            ok: true,
+            dryRun: true,
+            method: "note.document.update",
+            payload,
+            note: "No request was sent to Bitrix. Set dry_run=false and confirm=true to update the document."
+          };
+        }
+
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const note = new BitrixNoteService(client);
+        return { connectionId, dryRun: false, res: await note.documentUpdate(payload) };
+      }
+    },
+    {
+      name: "bitrix_note_document_delete",
+      description: "REST v3 Note: delete a knowledge base document via note.document.delete. Dangerous write operation: dry_run=true by default; requires confirm=true and confirm_delete_text=DELETE.",
+      risky: true,
+      inputSchema: z.object({
+        id: z.number().int().positive(),
+        dry_run: z.boolean().optional(),
+        confirm: z.boolean().optional(),
+        confirm_delete_text: z.string().optional()
+      }).merge(baseInput),
+      handler: async (ctx, input) => {
+        const dryRun = input.dry_run !== false;
+        if (!dryRun) {
+          requireConfirm("bitrix_note_document_delete", input, ctx.config.ALLOW_UNCONFIRMED_WRITES);
+          if (input.confirm_delete_text !== "DELETE") {
+            throw new Error("Deletion requires confirm_delete_text=DELETE.");
+          }
+        }
+
+        if (dryRun) {
+          return {
+            ok: true,
+            dryRun: true,
+            method: "note.document.delete",
+            payload: { id: input.id },
+            note: "No request was sent to Bitrix. Set dry_run=false, confirm=true, and confirm_delete_text=DELETE to delete the document."
+          };
+        }
+
+        const connectionId = input.connection_id ?? ctx.config.BITRIX_DEFAULT_CONNECTION_ID;
+        const { client } = await createBitrixClientForConnection({
+          pool: ctx.pool,
+          logger: ctx.logger,
+          connectionId,
+          encryptionKeyBase64: ctx.config.APP_ENCRYPTION_KEY_BASE64
+        });
+        const note = new BitrixNoteService(client);
+        return { connectionId, dryRun: false, res: await note.documentDelete(input.id) };
       }
     },
     {
