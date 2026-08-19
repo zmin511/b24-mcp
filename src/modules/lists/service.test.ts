@@ -12,7 +12,9 @@ class FakeClient {
   async call(method: string, params: any = {}) {
     this.calls.push({ method, params });
     if (method === "lists.section.get") {
-      return { result: this.sections.filter((s) => !params.FILTER?.ID || Number(s.ID) === Number(params.FILTER.ID)) };
+      let rows = this.sections;
+      if (params.FILTER?.ID) rows = rows.filter((s) => Number(s.ID) === Number(params.FILTER.ID));
+      return { result: rows };
     }
     if (method === "lists.section.add") {
       const id = this.nextSectionId++;
@@ -24,7 +26,6 @@ class FakeClient {
       if (!row) throw new Error("missing section");
       row.NAME = params.FIELDS.NAME;
       row.SORT = String(params.FIELDS.SORT);
-      if (params.IBLOCK_SECTION_ID !== undefined) row.IBLOCK_SECTION_ID = params.IBLOCK_SECTION_ID || null;
       return { result: true };
     }
     if (method === "lists.section.delete") {
@@ -47,7 +48,6 @@ class FakeClient {
       const row = this.elements.find((e) => Number(e.ID) === Number(params.ELEMENT_ID));
       if (!row) throw new Error("missing element");
       Object.assign(row, params.FIELDS);
-      if (params.IBLOCK_SECTION_ID !== undefined) row.IBLOCK_SECTION_ID = params.IBLOCK_SECTION_ID;
       return { result: true };
     }
     if (method === "lists.element.delete") {
@@ -69,6 +69,17 @@ describe("BitrixListsService", () => {
     expect(() => sanitizeAdditionalFields({ NAME: "bad" })).toThrow(/controlled/);
   });
 
+  it("uses documented NAME wildcard filters", async () => {
+    const client = new FakeClient();
+    const service = new BitrixListsService(client);
+    await service.findSectionByName(ctx, 2381, "Термометры");
+    await service.findElementByName(ctx, 2381, "Термометр AND dt-623");
+    const sectionCall = client.calls.find((c) => c.method === "lists.section.get");
+    const elementCall = client.calls.find((c) => c.method === "lists.element.get");
+    expect(sectionCall?.params.FILTER).toEqual({ NAME: "%Термометры%" });
+    expect(elementCall?.params.FILTER).toEqual({ NAME: "%Термометр AND dt-623%", IBLOCK_SECTION_ID: 2381 });
+  });
+
   it("skips an existing element by normalized SECTION_ID + NAME", async () => {
     const client = new FakeClient();
     client.elements.push({ ID: "41", NAME: "Термометр AND dt-623", IBLOCK_SECTION_ID: 2381 });
@@ -76,6 +87,17 @@ describe("BitrixListsService", () => {
     const res = await service.addElement(ctx, { sectionId: 2381, name: "  ТЕРМОМЕТР   and DT-623 " });
     expect(res.status).toBe("skipped");
     expect(client.calls.some((c) => c.method === "lists.element.add")).toBe(false);
+  });
+
+  it("rejects undocumented section and element moves", async () => {
+    const client = new FakeClient();
+    client.sections.push({ ID: "3001", NAME: "Термометры", IBLOCK_SECTION_ID: 2381, SORT: "500" });
+    client.elements.push({ ID: "4001", NAME: "Термометр", IBLOCK_SECTION_ID: 3001 });
+    const service = new BitrixListsService(client);
+    await expect(service.updateSection(ctx, { sectionId: 3001, parentSectionId: 9999 })).rejects.toThrow(/not supported/);
+    await expect(service.updateElement(ctx, { elementId: 4001, sectionId: 9999 })).rejects.toThrow(/not supported/);
+    expect(client.calls.some((c) => c.method === "lists.section.update")).toBe(false);
+    expect(client.calls.some((c) => c.method === "lists.element.update")).toBe(false);
   });
 
   it("dry-run batch performs no mutating REST calls", async () => {
