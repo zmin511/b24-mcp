@@ -83,6 +83,10 @@ function sameId(a: unknown, b: unknown): boolean {
   return parentId(a) === parentId(b);
 }
 
+function searchPattern(name: string): string {
+  return `%${name.trim()}%`;
+}
+
 export class BitrixListsService {
   constructor(private readonly client: ListsRestClient) {}
 
@@ -105,7 +109,7 @@ export class BitrixListsService {
   async findSectionByName(ctx: ListContext, parentSectionId: number, name: string): Promise<any | null> {
     const res = await this.client.call("lists.section.get", {
       ...this.base(ctx),
-      FILTER: { "%NAME": name },
+      FILTER: { NAME: searchPattern(name) },
       SELECT: ["ID", "CODE", "IBLOCK_SECTION_ID", "SORT", "NAME", "ACTIVE"]
     });
     const wanted = normalizeListName(name);
@@ -136,26 +140,27 @@ export class BitrixListsService {
     const current = await this.getSection(ctx, input.sectionId);
     if (!current) throw new Error(`Section ${input.sectionId} was not found`);
 
+    const currentParent = parentId(current.IBLOCK_SECTION_ID);
+    if (input.parentSectionId !== undefined && input.parentSectionId !== currentParent) {
+      throw new Error("Moving a list section to another parent is not supported by the documented lists.section.update REST contract");
+    }
+
     const nextName = input.name ?? String(current.NAME ?? "");
-    const nextParent = input.parentSectionId ?? parentId(current.IBLOCK_SECTION_ID);
-    if (input.name !== undefined || input.parentSectionId !== undefined) {
-      const duplicate = await this.findSectionByName(ctx, nextParent, nextName);
+    if (input.name !== undefined) {
+      const duplicate = await this.findSectionByName(ctx, currentParent, nextName);
       if (duplicate && Number(duplicate.ID) !== input.sectionId) {
         return { status: "skipped" as const, reason: "duplicate", id: Number(duplicate.ID), object: duplicate };
       }
     }
 
-    const payload: Record<string, unknown> = {
+    await this.client.call("lists.section.update", {
       ...this.base(ctx),
       SECTION_ID: input.sectionId,
       FIELDS: {
         NAME: nextName,
         SORT: input.sort ?? Number(current.SORT ?? 500)
       }
-    };
-    if (input.parentSectionId !== undefined) payload.IBLOCK_SECTION_ID = input.parentSectionId;
-
-    await this.client.call("lists.section.update", payload);
+    });
     const object = await this.getSection(ctx, input.sectionId);
     if (!object || Number(object.ID) !== input.sectionId) throw new Error(`Read-after-write failed for section ${input.sectionId}`);
     return { status: "updated" as const, id: input.sectionId, object };
@@ -181,7 +186,7 @@ export class BitrixListsService {
   async findElementByName(ctx: ListContext, sectionId: number, name: string): Promise<any | null> {
     const res = await this.client.call("lists.element.get", {
       ...this.base(ctx),
-      FILTER: { "%NAME": name, IBLOCK_SECTION_ID: sectionId },
+      FILTER: { NAME: searchPattern(name), IBLOCK_SECTION_ID: sectionId },
       SELECT: ["ID", "CODE", "NAME", "IBLOCK_SECTION_ID"]
     });
     const wanted = normalizeListName(name);
@@ -213,10 +218,14 @@ export class BitrixListsService {
     const current = await this.getElement(ctx, input.elementId);
     if (!current) throw new Error(`Element ${input.elementId} was not found`);
 
-    const nextSection = input.sectionId ?? parentId(current.IBLOCK_SECTION_ID);
+    const currentSection = parentId(current.IBLOCK_SECTION_ID);
+    if (input.sectionId !== undefined && input.sectionId !== currentSection) {
+      throw new Error("Moving a list element to another section is not supported by the documented lists.element.update REST contract");
+    }
+
     const nextName = input.name ?? String(current.NAME ?? "");
-    if (input.name !== undefined || input.sectionId !== undefined) {
-      const duplicate = await this.findElementByName(ctx, nextSection, nextName);
+    if (input.name !== undefined) {
+      const duplicate = await this.findElementByName(ctx, currentSection, nextName);
       if (duplicate && Number(duplicate.ID) !== input.elementId) {
         return { status: "skipped" as const, reason: "duplicate", id: Number(duplicate.ID), object: duplicate };
       }
@@ -227,14 +236,12 @@ export class BitrixListsService {
       if (key.startsWith("PROPERTY_")) preserved[key] = value;
     }
     const updates = sanitizeAdditionalFields(input.fields);
-    const payload: Record<string, unknown> = {
+
+    await this.client.call("lists.element.update", {
       ...this.base(ctx),
       ELEMENT_ID: input.elementId,
       FIELDS: { NAME: nextName, ...preserved, ...updates }
-    };
-    if (input.sectionId !== undefined) payload.IBLOCK_SECTION_ID = input.sectionId;
-
-    await this.client.call("lists.element.update", payload);
+    });
     const object = await this.getElement(ctx, input.elementId);
     if (!object || Number(object.ID) !== input.elementId) throw new Error(`Read-after-write failed for element ${input.elementId}`);
     return { status: "updated" as const, id: input.elementId, object };
