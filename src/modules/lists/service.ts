@@ -186,7 +186,7 @@ export class BitrixListsService {
   async findElementByName(ctx: ListContext, sectionId: number, name: string): Promise<any | null> {
     const res = await this.client.call("lists.element.get", {
       ...this.base(ctx),
-      FILTER: { NAME: searchPattern(name), IBLOCK_SECTION_ID: sectionId },
+      FILTER: { NAME: searchPattern(name), SECTION_ID: sectionId },
       SELECT: ["ID", "CODE", "NAME", "IBLOCK_SECTION_ID"]
     });
     const wanted = normalizeListName(name);
