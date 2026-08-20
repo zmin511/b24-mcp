@@ -35,7 +35,7 @@ class FakeClient {
     if (method === "lists.element.get") {
       let rows = this.elements;
       if (params.ELEMENT_ID) rows = rows.filter((e) => Number(e.ID) === Number(params.ELEMENT_ID));
-      if (params.FILTER?.IBLOCK_SECTION_ID) rows = rows.filter((e) => Number(e.IBLOCK_SECTION_ID) === Number(params.FILTER.IBLOCK_SECTION_ID));
+      if (params.FILTER?.SECTION_ID) rows = rows.filter((e) => Number(e.IBLOCK_SECTION_ID) === Number(params.FILTER.SECTION_ID));
       return { result: rows };
     }
     if (method === "lists.element.add") {
@@ -77,7 +77,7 @@ describe("BitrixListsService", () => {
     const sectionCall = client.calls.find((c) => c.method === "lists.section.get");
     const elementCall = client.calls.find((c) => c.method === "lists.element.get");
     expect(sectionCall?.params.FILTER).toEqual({ NAME: "%Термометры%" });
-    expect(elementCall?.params.FILTER).toEqual({ NAME: "%Термометр AND dt-623%", IBLOCK_SECTION_ID: 2381 });
+    expect(elementCall?.params.FILTER).toEqual({ NAME: "%Термометр AND dt-623%", SECTION_ID: 2381 });
   });
 
   it("skips an existing element by normalized SECTION_ID + NAME", async () => {
