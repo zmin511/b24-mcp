@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import { stdout } from "node:process";
+import { URL } from "node:url";
 
 const path = new URL("../src/mcp/server.ts", import.meta.url);
 let source = fs.readFileSync(path, "utf8");
@@ -247,4 +249,4 @@ if (!source.includes('name: "bitrix_list_section_add"')) {
 }
 
 fs.writeFileSync(path, source, "utf8");
-console.log("Applied typed Bitrix list MCP tools to src/mcp/server.ts");
+stdout.write("Applied typed Bitrix list MCP tools to src/mcp/server.ts\n");
