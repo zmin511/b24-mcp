@@ -60,17 +60,17 @@ if (!source.includes('name: "bitrix_list_repair_root_batch"')) {
 
             const sourceSectionId = Number(sourceElement.IBLOCK_SECTION_ID ?? 0) || 0;
             if (sourceSectionId !== 0) {
-              throw new Error(`Source element ${row.source_element_id} is not in list root; actual section=${sourceSectionId}`);
+              throw new Error("Source element " + row.source_element_id + " is not in list root; actual section=" + sourceSectionId);
             }
             if (normalizeName(sourceElement.NAME) !== normalizeName(row.name)) {
-              throw new Error(`Source element ${row.source_element_id} name does not match expected name`);
+              throw new Error("Source element " + row.source_element_id + " name does not match expected name");
             }
 
-            const sectionKey = `${row.parent_section_id}|${normalizeName(row.section_name)}`;
+            const sectionKey = String(row.parent_section_id) + "|" + normalizeName(row.section_name);
             let section = sectionCache.get(sectionKey);
             if (!section) {
               section = await lists.findSectionByName(listCtx, row.parent_section_id, row.section_name);
-              if (!section) throw new Error(`Target section '${row.section_name}' under ${row.parent_section_id} was not found`);
+              if (!section) throw new Error("Target section '" + row.section_name + "' under " + row.parent_section_id + " was not found");
               sectionCache.set(sectionKey, section);
             }
             const sectionId = Number(section.ID);
@@ -95,13 +95,13 @@ if (!source.includes('name: "bitrix_list_repair_root_batch"')) {
             }
 
             if (!target || Number(target.IBLOCK_SECTION_ID ?? 0) !== sectionId || normalizeName(target.NAME) !== normalizeName(row.name)) {
-              throw new Error(`Target verification failed for '${row.name}' in section ${sectionId}`);
+              throw new Error("Target verification failed for '" + row.name + "' in section " + sectionId);
             }
             out.target_element_id = Number(target.ID);
 
             const deleted = await lists.deleteElement(listCtx, row.source_element_id);
             if (deleted.status !== "deleted" && deleted.status !== "skipped") {
-              throw new Error(`Unexpected delete status for source ${row.source_element_id}`);
+              throw new Error("Unexpected delete status for source " + row.source_element_id);
             }
 
             out.status = "repaired";
